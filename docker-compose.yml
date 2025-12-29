@@ -1,7 +1,6 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: damas_db
     environment:
       POSTGRES_DB: damas
       POSTGRES_USER: damas
@@ -16,15 +15,28 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: ./app
-    container_name: damas_app
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      # Monta el código del repo (carpeta app/)
+      - ./app:/app
+      # Persistimos node_modules para no reinstalar en cada reinicio
+      - damas_node_modules:/app/node_modules
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://damas:${POSTGRES_PASSWORD:-cambia_esto}@db:5432/damas
       SESSION_SECRET: ${SESSION_SECRET:-cambia_esto_tambien}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8087}
       TRUST_PROXY: ${TRUST_PROXY:-false}
+    command: >
+      sh -lc "
+        if [ ! -f /app/node_modules/.installed ]; then
+          echo 'Installing deps (first run)...' &&
+          npm install --omit=dev &&
+          touch /app/node_modules/.installed;
+        fi
+        node server.js
+      "
     ports:
       - "8087:3000"
     depends_on:
@@ -34,3 +46,4 @@ services:
 
 volumes:
   damas_pg:
+  damas_node_modules:
