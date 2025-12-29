@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Damas - Web + Ranking</title>
+  <link rel="stylesheet" href="/style.css"/>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">♟️ Damas</div>
+    <div id="meBox" class="me"></div>
+  </div>
+
+  <div class="wrap">
+    <div class="card" id="authCard">
+      <h2>Entrar / Registrarse</h2>
+      <div class="row">
+        <input id="username" placeholder="usuario (a-zA-Z0-9_)" autocomplete="username"/>
+        <input id="password" placeholder="password" type="password" autocomplete="current-password"/>
+      </div>
+      <div class="row">
+        <button id="btnLogin">Login</button>
+        <button id="btnRegister">Registro</button>
+        <button id="btnLogout" class="ghost" style="display:none;">Logout</button>
+      </div>
+      <div class="hint" id="authMsg"></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Juego</h2>
+        <div class="row">
+          <button id="btnNewPvP" disabled>Crear sala PvP</button>
+          <button id="btnNewAI" disabled>Jugar vs IA</button>
+        </div>
+        <div class="row">
+          <input id="joinCode" placeholder="Código sala (ej: ABC123)" />
+          <button id="btnJoin" disabled>Unirse</button>
+        </div>
+
+        <div class="roomline">
+          <span>Sala:</span> <b id="roomCode">—</b>
+          <span class="sep"></span>
+          <span>Turno:</span> <b id="turnTxt">—</b>
+          <span class="sep"></span>
+          <span id="forcedTxt"></span>
+        </div>
+
+        <div id="board" class="board"></div>
+
+        <div id="status" class="hint"></div>
+      </div>
+
+      <div class="card">
+        <h2>Ranking (Elo)</h2>
+        <button id="btnRefreshLb" disabled>Actualizar</button>
+        <div class="tableWrap">
+          <table class="tbl" id="lbTable">
+            <thead>
+              <tr>
+                <th>#</th><th>Usuario</th><th>Elo</th><th>W</th><th>L</th><th>D</th><th>J</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="hint">Solo partidas PvP cuentan para el ranking.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

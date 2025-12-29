@@ -1,0 +1,56 @@
+:root { font-family: system-ui, Segoe UI, Roboto, Arial; }
+body { margin: 0; background: #0f1115; color: #e7e7e7; }
+.topbar { display:flex; justify-content:space-between; padding: 14px 18px; background:#151a22; border-bottom:1px solid #232a36; }
+.brand { font-weight: 800; letter-spacing: .5px; }
+.me { opacity: .9; }
+
+.wrap { padding: 18px; max-width: 1100px; margin: 0 auto; }
+.grid { display:grid; grid-template-columns: 1.2fr .8fr; gap: 16px; }
+.card { background:#151a22; border:1px solid #232a36; border-radius: 14px; padding: 14px; box-shadow: 0 10px 22px rgba(0,0,0,.25); }
+h2 { margin: 0 0 10px; font-size: 18px; }
+.row { display:flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+input { background:#0f1115; border:1px solid #2a3242; border-radius: 10px; padding: 10px 12px; color:#e7e7e7; outline: none; }
+button { background:#2b6cff; color:white; border:none; border-radius:10px; padding:10px 12px; cursor:pointer; font-weight: 700; }
+button:disabled { opacity: .45; cursor:not-allowed; }
+button.ghost { background: transparent; border:1px solid #2a3242; }
+.hint { opacity:.8; font-size: 13px; margin-top: 8px; min-height: 18px; }
+
+.roomline { display:flex; align-items:center; gap:8px; margin: 10px 0; opacity: .9; flex-wrap: wrap; }
+.sep { width: 10px; }
+
+.board {
+  width: 416px; height: 416px;
+  display:grid;
+  grid-template-columns: repeat(8, 1fr);
+  border-radius: 14px;
+  overflow:hidden;
+  border:1px solid #232a36;
+  user-select:none;
+}
+.cell {
+  display:flex; align-items:center; justify-content:center;
+  position: relative;
+}
+.dark { background:#2a2f3a; }
+.light { background:#1a1f29; }
+.cell.clickable { outline: 2px solid rgba(43,108,255,.5); outline-offset: -2px; cursor:pointer; }
+.cell.target { box-shadow: inset 0 0 0 3px rgba(0, 255, 170, .55); cursor:pointer; }
+
+.piece {
+  width: 76%; height: 76%;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.08), 0 8px 16px rgba(0,0,0,.35);
+}
+.red { background:#d64a4a; }
+.black { background:#4a4f5b; }
+.king::after {
+  content:"♕";
+  position:absolute;
+  font-size: 22px;
+  opacity:.95;
+}
+
+.tableWrap { overflow:auto; max-height: 420px; border-radius: 12px; border:1px solid #232a36; }
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th, .tbl td { padding: 8px 10px; border-bottom:1px solid #232a36; font-size: 13px; }
+.tbl th { position: sticky; top: 0; background:#151a22; text-align:left; }
