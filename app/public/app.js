@@ -74,6 +74,10 @@ async function refreshMe() {
 function initSocket() {
   socket = io();
 
+  socket.on("connect", () => {
+    if (me) socket.emit("setUser", { userId: me.id, username: me.username });
+  });
+
   socket.on("needUser", () => {
     if (me) socket.emit("setUser", { userId: me.id, username: me.username });
   });
