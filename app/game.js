@@ -122,10 +122,10 @@ function computeCapturesFrom(board, fromR, fromC) {
     let extended = false;
 
     for (const [dr, dc] of dirs) {
-      const mr = node.r + dr / 2;
-      const mc = node.c + dc / 2;
-      const tr = node.r + dr;
-      const tc = node.c + dc;
+      const mr = node.r + dr;
+      const mc = node.c + dc;
+      const tr = node.r + 2 * dr;
+      const tc = node.c + 2 * dc;
       if (!inBounds(tr, tc) || !inBounds(mr, mc)) continue;
       const mid = node.board[mr][mc];
       if (mid === 0) continue;
