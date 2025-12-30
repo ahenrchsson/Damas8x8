@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: damas
       POSTGRES_USER: damas
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cambia_esto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - damas_pg:/var/lib/postgresql/data
     healthcheck:
@@ -20,12 +20,12 @@ services:
       dockerfile: Dockerfile
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://damas:${POSTGRES_PASSWORD:-cambia_esto}@db:5432/damas
-      SESSION_SECRET: ${SESSION_SECRET:-cambia_esto_tambien}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8087}
-      TRUST_PROXY: ${TRUST_PROXY:-false}
+      DATABASE_URL: postgres://damas:${POSTGRES_PASSWORD}@db:5432/damas
+      SESSION_SECRET: ${SESSION_SECRET}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      TRUST_PROXY: ${TRUST_PROXY}
     ports:
-      - "999:3000"
+      - "${APP_PORT}:3000"
     depends_on:
       db:
         condition: service_healthy
