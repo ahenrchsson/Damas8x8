@@ -20,6 +20,7 @@ services:
       dockerfile: Dockerfile
     environment:
       NODE_ENV: production
+
       DATABASE_URL: postgres://damas:${POSTGRES_PASSWORD}@db:5432/damas
       SESSION_SECRET: ${SESSION_SECRET}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
@@ -29,6 +30,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
     restart: unless-stopped
 
 volumes:
