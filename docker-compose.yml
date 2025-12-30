@@ -25,7 +25,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8087}
       TRUST_PROXY: ${TRUST_PROXY:-false}
     ports:
-      - "8087:3000"
+      - "999:3000"
     depends_on:
       db:
         condition: service_healthy
