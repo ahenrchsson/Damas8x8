@@ -51,7 +51,7 @@ async function main() {
     limit: 120
   }));
 
-  app.use(session({
+  const sessionMiddleware = session({
     store: new PgSession({
       pool,
       tableName: "user_sessions",
@@ -65,7 +65,9 @@ async function main() {
       sameSite: "lax",
       secure: false
     }
-  }));
+  });
+
+  app.use(sessionMiddleware);
 
   // ---------- Auth ----------
   const credsSchema = z.object({
@@ -148,6 +150,18 @@ async function main() {
 
   const server = http.createServer(app);
   const io = new Server(server, { cors: { origin: false } });
+
+  io.use((socket, next) => {
+    sessionMiddleware(socket.request, {}, (err) => {
+      if (err) return next(err);
+      const sess = socket.request.session;
+      if (sess?.userId) {
+        socket.data.userId = sess.userId;
+        socket.data.username = sess.username;
+      }
+      next();
+    });
+  });
 
   // ---------- Game Rooms (in-memory state) ----------
   const rooms = new Map(); // roomCode -> roomState
@@ -323,11 +337,6 @@ async function main() {
       io.to(room.code).emit("gameOver", chk);
     }
   }
-
-  io.use((socket, next) => {
-    // reutilizar sesión de Express (cookie). Para demo simple, validamos con /api/me desde el cliente.
-    next();
-  });
 
   io.on("connection", (socket) => {
     socket.on("createRoom", async ({ mode }) => {
