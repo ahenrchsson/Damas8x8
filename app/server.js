@@ -170,7 +170,8 @@ async function main() {
       },
       ai,
       lastMove: null,
-      over: false
+      over: false,
+      messages: []
     };
   }
 
@@ -187,7 +188,13 @@ async function main() {
         black: room.players.black ? { username: room.players.black.username } : (room.ai ? { username: "AI" } : null)
       },
       lastMove: room.lastMove,
-      over: room.over
+      over: room.over,
+      messages: room.messages.slice(-50).map(m => ({
+        id: m.id,
+        user: m.username,
+        text: m.text,
+        ts: m.ts
+      }))
     };
   }
 
@@ -215,6 +222,22 @@ async function main() {
   function isUsersTurn(room, userId) {
     const p = room.players[room.turn];
     return p && p.id === userId;
+  }
+
+  function pushChatMessage(room, { userId, username, text }) {
+    if (!text) return;
+    const msg = {
+      id: nanoid(8),
+      userId,
+      username,
+      text,
+      ts: Date.now()
+    };
+    room.messages.push(msg);
+    if (room.messages.length > 50) {
+      room.messages = room.messages.slice(-50);
+    }
+    return msg;
   }
 
   async function finalizeRatedGame(room, winnerColor) {
@@ -389,6 +412,24 @@ async function main() {
         if (room.ai) {
           await maybePlayAI(room);
         }
+      }
+    });
+
+    socket.on("chatMessage", ({ code, text }) => {
+      const room = rooms.get(code);
+      if (!room) return;
+
+      const userId = socket.data.userId;
+      const username = socket.data.username || "Jugador";
+      if (!userId) return socket.emit("err", { error: "no_auth" });
+      if (!socket.rooms.has(code)) return socket.emit("err", { error: "not_in_room" });
+
+      const msgText = (text || "").toString().trim().slice(0, 240);
+      if (!msgText) return;
+
+      const msg = pushChatMessage(room, { userId, username, text: msgText });
+      if (msg) {
+        io.to(code).emit("chatMessage", { id: msg.id, user: msg.username, text: msg.text, ts: msg.ts });
       }
     });
 
