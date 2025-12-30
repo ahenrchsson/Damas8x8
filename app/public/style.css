@@ -54,3 +54,12 @@ button.ghost { background: transparent; border:1px solid #2a3242; }
 .tbl { width: 100%; border-collapse: collapse; }
 .tbl th, .tbl td { padding: 8px 10px; border-bottom:1px solid #232a36; font-size: 13px; }
 .tbl th { position: sticky; top: 0; background:#151a22; text-align:left; }
+
+.chat { margin-top: 14px; border:1px solid #232a36; border-radius: 12px; padding: 10px; background:#0f1115; }
+.chatHeader { font-weight: 700; margin-bottom: 8px; }
+.chatLog { max-height: 180px; overflow-y: auto; background:#0c0e13; border:1px solid #232a36; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.chatLine { font-size: 13px; line-height: 1.35; }
+.chatLine .user { font-weight: 700; color: #8cb4ff; margin-right: 6px; }
+.chatLine .time { opacity: .6; margin-left: 6px; font-size: 11px; }
+.chatInputRow { display: flex; gap: 8px; margin-top: 8px; }
+.chatInputRow input { flex: 1; }

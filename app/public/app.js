@@ -15,6 +15,9 @@ const turnTxt = $("turnTxt");
 const forcedTxt = $("forcedTxt");
 const status = $("status");
 const boardEl = $("board");
+const chatLog = $("chatLog");
+const chatInput = $("chatInput");
+const chatSend = $("chatSend");
 
 const btnRefreshLb = $("btnRefreshLb");
 const lbTableBody = $("lbTable").querySelector("tbody");
@@ -43,6 +46,14 @@ function setAuthUI(logged) {
   btnJoin.disabled = !logged;
   btnRefreshLb.disabled = !logged;
   btnLogout.style.display = logged ? "inline-block" : "none";
+  updateChatControls();
+}
+
+function updateChatControls() {
+  const canChat = !!(me && currentRoom);
+  chatInput.disabled = !canChat;
+  chatSend.disabled = !canChat;
+  chatInput.placeholder = canChat ? "Escribe un mensaje..." : "Entra a una sala para chatear";
 }
 
 async function refreshMe() {
@@ -57,6 +68,7 @@ async function refreshMe() {
     meBox.textContent = "No logueado";
     setAuthUI(false);
   }
+  updateChatControls();
 }
 
 function initSocket() {
@@ -72,10 +84,11 @@ function initSocket() {
     currentRoom = code;
     roomCode.textContent = code;
     status.textContent = "Sala creada. Comparte el código o juega vs IA.";
+    updateChatControls();
   });
 
   socket.on("state", (st) => {
-    state = st;
+    state = { ...st, messages: st.messages || [] };
     currentRoom = st.code;
     roomCode.textContent = st.code;
     turnTxt.textContent = st.turn;
@@ -83,6 +96,8 @@ function initSocket() {
     status.textContent = `${st.players.red?.username || "—"} (rojo) vs ${st.players.black?.username || "—"} (negro)`;
     selected = null;
     renderBoard();
+    renderChat();
+    updateChatControls();
   });
 
   socket.on("gameOver", (g) => {
@@ -92,6 +107,14 @@ function initSocket() {
 
   socket.on("err", (e) => {
     status.textContent = `Error: ${e.error}`;
+  });
+
+  socket.on("chatMessage", (msg) => {
+    if (!state) return;
+    if (!state.messages) state.messages = [];
+    state.messages.push(msg);
+    state.messages = state.messages.slice(-50);
+    renderChat();
   });
 
   // registra el usuario
@@ -137,6 +160,34 @@ function renderBoard() {
   }
 }
 
+function renderChat() {
+  if (!state || !Array.isArray(state.messages)) {
+    chatLog.innerHTML = "<div class=\"hint\">Sin mensajes</div>";
+    return;
+  }
+  chatLog.innerHTML = "";
+  const messages = state.messages;
+  for (const msg of messages) {
+    const line = document.createElement("div");
+    line.className = "chatLine";
+    const user = document.createElement("span");
+    user.className = "user";
+    user.textContent = msg.user || "Jugador";
+    const text = document.createElement("span");
+    text.className = "text";
+    text.textContent = msg.text;
+    const time = document.createElement("span");
+    time.className = "time";
+    const date = new Date(msg.ts || Date.now());
+    time.textContent = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    line.appendChild(user);
+    line.appendChild(text);
+    line.appendChild(time);
+    chatLog.appendChild(line);
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
 function clearTargetHighlights() {
   [...boardEl.querySelectorAll(".cell")].forEach(x => {
     x.classList.remove("target");
@@ -164,6 +215,14 @@ function submitMove(path) {
   if (!socket || !currentRoom) return;
   socket.emit("move", { code: currentRoom, path });
   clearTargetHighlights();
+}
+
+function sendChatMessage() {
+  if (!socket || !currentRoom) return;
+  const text = chatInput.value.trim();
+  if (!text) return;
+  socket.emit("chatMessage", { code: currentRoom, text });
+  chatInput.value = "";
 }
 
 function getMyColor() {
@@ -213,6 +272,14 @@ btnJoin.onclick = () => {
 };
 
 btnRefreshLb.onclick = () => refreshLeaderboard();
+
+chatSend.onclick = () => sendChatMessage();
+chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
 
 async function refreshLeaderboard() {
   if (!me) return;
