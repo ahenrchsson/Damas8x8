@@ -77,10 +77,11 @@ function initSocket() {
   socket = io();
 
   socket.on("connect", () => {
+
     socketReady = false;
     if (me) socket.emit("setUser", { userId: me.id, username: me.username });
     setAuthUI(!!me);
-  });
+
 
   socket.on("needUser", () => {
     if (me) socket.emit("setUser", { userId: me.id, username: me.username });

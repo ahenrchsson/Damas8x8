@@ -122,28 +122,29 @@ function computeCapturesFrom(board, fromR, fromC) {
     let extended = false;
 
     for (const [dr, dc] of dirs) {
-      const mr = node.r + dr / 2;
-      const mc = node.c + dc / 2;
-      const tr = node.r + dr;
-      const tc = node.c + dc;
-      if (!inBounds(tr, tc) || !inBounds(mr, mc)) continue;
-      const mid = node.board[mr][mc];
+      // dr/dc are unit steps; land two steps away when jumping
+      const enemyR = node.r + dr;
+      const enemyC = node.c + dc;
+      const landingR = enemyR + dr;
+      const landingC = enemyC + dc;
+      if (!inBounds(landingR, landingC) || !inBounds(enemyR, enemyC)) continue;
+      const mid = node.board[enemyR][enemyC];
       if (mid === 0) continue;
       if (colorOf(mid) !== opponentColor(colorOf(piece))) continue;
-      if (node.board[tr][tc] !== 0) continue;
+      if (node.board[landingR][landingC] !== 0) continue;
 
       // aplicar salto
       const nb = cloneBoard(node.board);
       nb[node.r][node.c] = 0;
-      nb[mr][mc] = 0;
-      nb[tr][tc] = piece;
+      nb[enemyR][enemyC] = 0;
+      nb[landingR][landingC] = piece;
 
       dfs({
-        r: tr,
-        c: tc,
+        r: landingR,
+        c: landingC,
         board: nb,
-        path: node.path.concat([[tr, tc]]),
-        caps: node.caps.concat([[mr, mc]])
+        path: node.path.concat([[landingR, landingC]]),
+        caps: node.caps.concat([[enemyR, enemyC]])
       });
 
       extended = true;
