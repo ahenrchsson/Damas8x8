@@ -24,6 +24,7 @@ const lbTableBody = $("lbTable").querySelector("tbody");
 
 let me = null;
 let socket = null;
+let socketReady = false;
 
 let currentRoom = null;
 let state = null;
@@ -41,10 +42,11 @@ async function api(path, method = "GET", body) {
 }
 
 function setAuthUI(logged) {
-  btnNewPvP.disabled = !logged;
-  btnNewAI.disabled = !logged;
-  btnJoin.disabled = !logged;
-  btnRefreshLb.disabled = !logged;
+  const canPlay = logged && socketReady;
+  btnNewPvP.disabled = !canPlay;
+  btnNewAI.disabled = !canPlay;
+  btnJoin.disabled = !canPlay;
+  btnRefreshLb.disabled = !logged || !socketReady;
   btnLogout.style.display = logged ? "inline-block" : "none";
   updateChatControls();
 }
@@ -74,11 +76,20 @@ async function refreshMe() {
 function initSocket() {
   socket = io();
 
+  socket.on("connect", () => {
+    socketReady = false;
+    if (me) socket.emit("setUser", { userId: me.id, username: me.username });
+    setAuthUI(!!me);
+  });
+
   socket.on("needUser", () => {
     if (me) socket.emit("setUser", { userId: me.id, username: me.username });
   });
 
-  socket.on("userOk", () => {});
+  socket.on("userOk", () => {
+    socketReady = true;
+    setAuthUI(!!me);
+  });
 
   socket.on("roomCreated", ({ code }) => {
     currentRoom = code;
@@ -115,6 +126,11 @@ function initSocket() {
     state.messages.push(msg);
     state.messages = state.messages.slice(-50);
     renderChat();
+  });
+
+  socket.on("disconnect", () => {
+    socketReady = false;
+    setAuthUI(!!me);
   });
 
   // registra el usuario
@@ -212,13 +228,13 @@ function highlightTargets(paths) {
 }
 
 function submitMove(path) {
-  if (!socket || !currentRoom) return;
+  if (!socket || !currentRoom || !socketReady) return;
   socket.emit("move", { code: currentRoom, path });
   clearTargetHighlights();
 }
 
 function sendChatMessage() {
-  if (!socket || !currentRoom) return;
+  if (!socket || !currentRoom || !socketReady) return;
   const text = chatInput.value.trim();
   if (!text) return;
   socket.emit("chatMessage", { code: currentRoom, text });
@@ -262,12 +278,19 @@ btnLogout.onclick = async () => {
 };
 
 // ---------- game buttons ----------
-btnNewPvP.onclick = () => socket?.emit("newRoom", { mode: "pvp" });
-btnNewAI.onclick = () => socket?.emit("newRoom", { mode: "ai" });
+btnNewPvP.onclick = () => {
+  if (!socketReady) return;
+  socket?.emit("newRoom", { mode: "pvp" });
+};
+btnNewAI.onclick = () => {
+  if (!socketReady) return;
+  socket?.emit("newRoom", { mode: "ai" });
+};
 
 btnJoin.onclick = () => {
   const code = joinCode.value.trim().toUpperCase();
   if (!code) return;
+  if (!socketReady) return;
   socket?.emit("joinRoom", { code });
 };
 
