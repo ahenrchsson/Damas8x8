@@ -434,10 +434,14 @@ async function main() {
     io.to(lobbyRoomName).emit("lobbyRooms", lobbyList());
   }
 
-  function pickRandomMove(room) {
-    const pool = room.availableCaptures.length > 0 ? room.availableCaptures : room.availableNormals;
-    if (!pool || pool.length === 0) return null;
-    return pool[Math.floor(Math.random() * pool.length)];
+  function pickRandomMove(board, color) {
+    const generated = computeMoves(board, color);
+    const pool = generated.moves;
+    if (!pool || pool.length === 0) return { move: null, generated };
+    return {
+      move: pool[Math.floor(Math.random() * pool.length)],
+      generated
+    };
   }
 
   async function maybePlayAI(room) {
@@ -446,11 +450,20 @@ async function main() {
 
     room.pendingBlow = null;
     room.pendingDraw = null;
-    const m = pickRandomMove(room);
-    if (!m) return;
+    const { move, generated } = pickRandomMove(room.board, room.turn);
+    const legalMoves = generated.moves || [];
+    if (!move) return;
 
-    room.board = applyMove(room.board, m);
-    room.lastMove = { color: "black", move: m };
+    const match = legalMoves.find((m) => moveSignature(m) === moveSignature(move));
+    if (!match) {
+      console.warn("AI generated illegal move, retrying");
+      if (legalMoves.length === 0) return;
+      room.board = applyMove(room.board, legalMoves[0]);
+      room.lastMove = { color: "black", move: legalMoves[0] };
+    } else {
+      room.board = applyMove(room.board, match);
+      room.lastMove = { color: "black", move: match };
+    }
     room.turn = "red";
 
     const chk = recompute(room);

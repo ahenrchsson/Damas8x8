@@ -63,3 +63,52 @@ test("keeps alternative routes that share a destination", () => {
   const prefixes = res.moves.map((m) => m.path.map((p) => `${p.r},${p.c}`).join("|"));
   assert.notStrictEqual(prefixes[0], prefixes[1], "las rutas deben diferir en su secuencia");
 });
+
+test("red man cannot capture backwards", () => {
+  const b = emptyBoard();
+  b[3][2] = 1; // peón rojo
+  b[4][3] = -1; // solo captura hacia atrás disponible
+
+  const res = computeMoves(b, "red");
+  assert.strictEqual(res.forced, false, "no debe forzar captura hacia atrás");
+  assert.strictEqual(res.captures.length, 0);
+  assert.ok(res.moves.every((m) => !m.isCapture), "ningún movimiento debe ser captura");
+});
+
+test("black man cannot capture backwards", () => {
+  const b = emptyBoard();
+  b[4][3] = -1; // peón negro
+  b[3][2] = 1; // pieza roja detrás (captura ilegal)
+
+  const res = computeMoves(b, "black");
+  assert.strictEqual(res.forced, false);
+  assert.strictEqual(res.captures.length, 0);
+  assert.ok(res.moves.every((m) => !m.isCapture));
+});
+
+test("kings can capture backwards", () => {
+  const b = emptyBoard();
+  b[3][2] = 2; // rey rojo
+  b[4][3] = -1; // pieza negra detrás
+
+  const res = computeMoves(b, "red");
+  assert.strictEqual(res.forced, true);
+  assert.ok(res.moves.every((m) => m.isCapture));
+  const destinations = res.moves.map((m) => `${m.pieceTo.r},${m.pieceTo.c}`);
+  assert.ok(destinations.includes("5,4"), "debe poder capturar hacia atrás y aterrizar detrás de la pieza");
+});
+
+test("promotion ends man capture sequence", () => {
+  const b = emptyBoard();
+  b[5][2] = -1; // peón negro
+  b[6][3] = 1; // primera captura
+  b[6][5] = 1; // quedaría disponible si pudiera seguir como dama
+
+  const res = computeMoves(b, "black");
+  assert.strictEqual(res.forced, true);
+  assert.strictEqual(res.moves.length, 1, "solo debe haber una jugada de captura");
+  const mv = res.moves[0];
+  assert.ok(mv.promotes, "el peón debe coronarse");
+  assert.strictEqual(mv.captures.length, 1, "la secuencia termina al coronar");
+  assert.strictEqual(mv.path.length, 2, "no debe encadenar capturas post-coronación");
+});

@@ -36,9 +36,9 @@ function dirsForPiece(v, { capture = false } = {}) {
   const col = colorOf(v);
   if (!col) return [];
   if (king) return DIAGONALS;
-  // Peones: movimiento normal hacia adelante, captura en todas las diagonales (regla española/portuguesa)
-  if (capture) return DIAGONALS;
-  return col === "red" ? [[-1, -1], [-1, 1]] : [[1, -1], [1, 1]];
+  const forward = col === "red" ? -1 : 1;
+  // Peones: solo hacia adelante tanto para mover como para capturar
+  return [[forward, -1], [forward, 1]];
 }
 
 function opponentColor(col) { return col === "red" ? "black" : "red"; }
@@ -95,18 +95,27 @@ function generateManCaptureSequences(board, from) {
       if (mid === 0 || colorOf(mid) !== opponentColor(col)) continue;
       if (node.board[landR][landC] !== 0) continue;
 
+      const promotesHere = wouldPromote(v, landR);
       const nb = cloneBoard(node.board);
       nb[node.r][node.c] = 0;
       nb[midR][midC] = 0;
       nb[landR][landC] = v;
 
-      dfs({
+      const nextNode = {
         r: landR,
         c: landC,
         board: nb,
         caps: node.caps.concat([capturedMeta(node.board, midR, midC)]),
         path: node.path.concat([coord(landR, landC)])
-      });
+      };
+
+      if (promotesHere) {
+        results.push(buildMove({ piece: v, path: nextNode.path, captures: nextNode.caps }));
+        extended = true;
+        continue;
+      }
+
+      dfs(nextNode);
       extended = true;
     }
 
