@@ -12,7 +12,16 @@ const { z } = require("zod");
 const { nanoid } = require("nanoid");
 const { Server } = require("socket.io");
 
-const { makePool, migrate, ensureUserRating, getRating, upsertRating } = require("./db");
+const {
+  makePool,
+  migrate,
+  ensureUserRating,
+  getRating,
+  upsertRating,
+  setActiveRoom,
+  clearActiveRoom,
+  getActiveRoom
+} = require("./db");
 const {
   initialBoard, computeMoves, applyMove, serializeMoveMap, hasAnyPieces, colorOf
 } = require("./game");
@@ -145,6 +154,32 @@ async function main() {
     res.json({ leaderboard: rows });
   });
 
+  const closeRoomSchema = z.object({
+    reason: z.enum(["leave", "finished", "surrender", "ai_exit"]).optional(),
+    requestedBy: z.number().optional()
+  });
+
+  async function handleCloseRequest(req, res) {
+    if (!req.session.userId) return res.status(401).json({ error: "no_auth" });
+    const parsed = closeRoomSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: "bad_input" });
+
+    const code = (req.params.roomCode || req.params.code || "").toUpperCase();
+    const room = rooms.get(code);
+    if (!room) return res.status(404).json({ error: "room_not_found" });
+
+    const uid = req.session.userId;
+    const isPlayer = room.players.red?.id === uid || room.players.black?.id === uid;
+    if (!isPlayer) return res.status(403).json({ error: "not_player" });
+
+    const reason = parsed.data.reason || (room.ai ? "ai_exit" : "leave");
+    await cleanupRoom(room, reason, uid);
+    return res.json({ ok: true });
+  }
+
+  app.post("/rooms/:roomCode/close", requireAuth, handleCloseRequest);
+  app.post("/api/rooms/:roomCode/close", requireAuth, handleCloseRequest);
+
   // ---------- Static ----------
   app.use(express.static(path.join(__dirname, "public")));
 
@@ -180,13 +215,14 @@ async function main() {
     room.availableNormals = moves.normals;
   }
 
-  function makeRoomState({ code, name, mode, redUser, blackUser, ai = false }) {
+  function makeRoomState({ code, name, mode, redUser, blackUser, ai = false, difficulty = null }) {
     const board = initialBoard();
     const turn = "red"; // rojo parte
     const room = {
       code,
       name: name || `Sala ${code}`,
       mode, // 'pvp' | 'ai'
+      difficulty: ai ? (difficulty || "easy") : null,
       createdAt: Date.now(),
       board,
       turn,
@@ -222,6 +258,7 @@ async function main() {
       code: room.code,
       name: room.name,
       mode: room.mode,
+      difficulty: room.difficulty || null,
       board: room.board,
       turn: room.turn,
       forced: room.forced,
@@ -342,18 +379,47 @@ async function main() {
     );
   }
 
-  function lobbyList() {
-    return Array.from(rooms.values()).map((room) => ({
+  async function cleanupRoom(room, reason = "manual", requestedBy = null) {
+    if (!room) return;
+    io.to(room.code).emit("roomClosed", {
       code: room.code,
-      name: room.name,
-      status: roomStatus(room),
-      players: [
-        room.players.red ? room.players.red.username : null,
-        room.players.black ? room.players.black.username : (room.ai ? "AI" : null)
-      ],
-      observers: room.observers.size,
-      over: room.over
-    }));
+      reason,
+      requestedBy,
+      message: "La sala ha sido cerrada."
+    });
+
+    const redId = room.players.red?.id;
+    const blackId = room.players.black?.id;
+
+    if (redId) {
+      userRoomMap.delete(redId);
+      await clearActiveRoom(pool, redId);
+    }
+    if (blackId && !room.ai) {
+      userRoomMap.delete(blackId);
+      await clearActiveRoom(pool, blackId);
+    }
+
+    rooms.delete(room.code);
+    io.in(room.code).socketsLeave(room.code);
+    emitLobby();
+  }
+
+  function lobbyList() {
+    return Array.from(rooms.values())
+      .filter((room) => room.mode === "pvp" && !room.ai && roomStatus(room) !== "finished")
+      .filter((room) => room.players.red || room.players.black)
+      .map((room) => ({
+        code: room.code,
+        name: room.name,
+        status: roomStatus(room),
+        players: [
+          room.players.red ? room.players.red.username : null,
+          room.players.black ? room.players.black.username : null
+        ],
+        observers: room.observers.size,
+        over: room.over
+      }));
   }
 
   function emitLobby() {
@@ -443,15 +509,24 @@ async function main() {
 
     socket.on("listRooms", () => socket.emit("lobbyRooms", lobbyList()));
 
-    socket.on("newRoom", async ({ mode, name }) => {
+    socket.on("newRoom", async ({ mode, name, difficulty }) => {
       if (!ensureAuth()) return;
+      const userId = socket.data.userId;
+
+      const active = await getActiveRoom(pool, userId);
+      if (active) {
+        if (rooms.has(active.room_code)) {
+          return socket.emit("err", { error: "active_room_exists", message: "Ya tienes una sala activa. Finaliza o abandona la partida antes de crear otra." });
+        }
+        await clearActiveRoom(pool, userId);
+      }
 
       const code = nanoid(6).toUpperCase();
       const redUser = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
 
       let room;
       if (mode === "ai") {
-        room = makeRoomState({ code, name, mode: "ai", redUser, blackUser: null, ai: true });
+        room = makeRoomState({ code, name, mode: "ai", redUser, blackUser: null, ai: true, difficulty });
       } else {
         room = makeRoomState({ code, name, mode: "pvp", redUser, blackUser: null, ai: false });
       }
@@ -459,6 +534,7 @@ async function main() {
       rooms.set(code, room);
       socket.join(code);
       userRoomMap.set(redUser.id, { code, color: "red" });
+      await setActiveRoom(pool, redUser.id, code, room.mode);
       emitLobby();
       socket.emit("roomCreated", { code });
       sendState(room);
@@ -467,34 +543,46 @@ async function main() {
 
     socket.on("joinRoom", async ({ code }) => {
       if (!ensureAuth()) return;
-      const room = rooms.get(code);
+      const roomCode = (code || "").toUpperCase();
+      const room = rooms.get(roomCode);
       if (!room) return socket.emit("err", { error: "room_not_found" });
 
       if (room.mode !== "pvp" || room.ai) return socket.emit("err", { error: "room_not_joinable" });
       if (room.players.black) return socket.emit("err", { error: "room_full" });
       if (room.players.red?.id === socket.data.userId) return socket.emit("err", { error: "same_user" });
+      const active = await getActiveRoom(pool, socket.data.userId);
+      if (active) {
+        if (rooms.has(active.room_code)) {
+          return socket.emit("err", { error: "active_room_exists", message: "Ya tienes una sala activa. Finaliza o abandona la partida antes de crear otra." });
+        }
+        await clearActiveRoom(pool, socket.data.userId);
+      }
 
       room.players.black = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
 
-      socket.join(code);
-      userRoomMap.set(socket.data.userId, { code, color: "black" });
+      socket.join(roomCode);
+      userRoomMap.set(socket.data.userId, { code: roomCode, color: "black" });
+      await setActiveRoom(pool, socket.data.userId, roomCode, room.mode);
       emitLobby();
       sendState(room);
     });
 
     socket.on("observeRoom", ({ code }) => {
-      const room = rooms.get(code);
+      const roomCode = (code || "").toUpperCase();
+      const room = rooms.get(roomCode);
       if (!room) return socket.emit("err", { error: "room_not_found" });
+      if (room.ai) return socket.emit("err", { error: "room_not_observable", message: "Las salas contra IA no aceptan observadores." });
       room.observers.set(socket.id, { username: socket.data.username || "Observador" });
-      socket.join(code);
+      socket.join(roomCode);
       emitLobby();
       sendState(room);
     });
 
     socket.on("leaveRoom", ({ code }) => {
-      const room = rooms.get(code);
+      const roomCode = (code || "").toUpperCase();
+      const room = rooms.get(roomCode);
       if (!room) return;
-      socket.leave(code);
+      socket.leave(roomCode);
       if (room.observers.has(socket.id)) {
         room.observers.delete(socket.id);
         emitLobby();
@@ -521,6 +609,17 @@ async function main() {
       if (!ensureAuth()) return;
       const ref = userRoomMap.get(socket.data.userId);
       if (ref?.code === code) userRoomMap.delete(socket.data.userId);
+    });
+
+    socket.on("room:close", async ({ code, reason }) => {
+      if (!ensureAuth()) return;
+      const room = rooms.get((code || "").toUpperCase());
+      if (!room) return socket.emit("err", { error: "room_not_found" });
+      const uid = socket.data.userId;
+      const isPlayer = room.players.red?.id === uid || room.players.black?.id === uid;
+      if (!isPlayer) return socket.emit("err", { error: "not_player" });
+      const closureReason = reason || (room.ai ? "ai_exit" : "leave");
+      await cleanupRoom(room, closureReason, uid);
     });
 
     socket.on("move", async ({ code, path }) => {
@@ -571,9 +670,7 @@ async function main() {
         const winnerColor = chk.winner === "red" || chk.winner === "black" ? chk.winner : null;
         io.to(code).emit("gameOver", chk);
         await finalizeRatedGame(room, winnerColor);
-        if (room.players.red) userRoomMap.delete(room.players.red.id);
-        if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
-        emitLobby();
+        await cleanupRoom(room, "finished");
       } else {
         // si es IA, juega
         if (room.ai) {
@@ -602,9 +699,7 @@ async function main() {
         const winnerColor = chk.winner === "red" || chk.winner === "black" ? chk.winner : null;
         io.to(code).emit("gameOver", { ...chk, reason: chk.reason || "blown" });
         await finalizeRatedGame(room, winnerColor);
-        if (room.players.red) userRoomMap.delete(room.players.red.id);
-        if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
-        emitLobby();
+        await cleanupRoom(room, "finished");
       }
     });
 
@@ -672,9 +767,7 @@ async function main() {
         const result = { over: true, winner: null, reason: "draw" };
         io.to(code).emit("gameOver", result);
         await finalizeRatedGame(room, null);
-        if (room.players.red) userRoomMap.delete(room.players.red.id);
-        if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
-        emitLobby();
+        await cleanupRoom(room, "finished");
       } else {
         room.pendingDraw = null;
         sendState(room);
@@ -691,9 +784,7 @@ async function main() {
       sendState(room);
       io.to(code).emit("gameOver", { over: true, winner, reason: "resign" });
       await finalizeRatedGame(room, winner);
-      if (room.players.red) userRoomMap.delete(room.players.red.id);
-      if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
-      emitLobby();
+      await cleanupRoom(room, "surrender");
     });
 
     socket.on("disconnect", () => {

@@ -20,7 +20,7 @@ h3 { margin-top: 0; }
 .cardHeader { display:flex; align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .row { display:flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
 .row.stack { flex-direction: column; }
-input { background:#0f1115; border:1px solid #2a3242; border-radius: 10px; padding: 10px 12px; color:#e7e7e7; outline: none; min-width: 0; }
+input, select { background:#0f1115; border:1px solid #2a3242; border-radius: 10px; padding: 10px 12px; color:#e7e7e7; outline: none; min-width: 0; }
 button { background:#2b6cff; color:white; border:none; border-radius:10px; padding:10px 12px; cursor:pointer; font-weight: 700; }
 button:disabled { opacity: .45; cursor:not-allowed; }
 button.ghost { background: transparent; border:1px solid #2a3242; }
