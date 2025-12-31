@@ -104,6 +104,20 @@
             <span class="pill ghost" id="rolePill">Observando</span>
           </div>
           <div id="board" class="board"></div>
+          <div id="movePanel" class="movePanel hidden">
+            <div class="movePanelHeader">
+              <div>
+                <div class="movePanelTitle">Previsualización de ruta</div>
+                <div id="movePanelSummary" class="hint">Selecciona una ficha para ver opciones</div>
+              </div>
+              <div class="movePanelActions">
+                <button id="btnCancelMove" class="ghost">Cancelar</button>
+                <button id="btnConfirmMove" disabled>Confirmar</button>
+              </div>
+            </div>
+            <div id="capturePreview" class="capturePreview hint"></div>
+            <div id="routeOptions" class="routeOptions"></div>
+          </div>
           <div id="status" class="hint"></div>
         </div>
 

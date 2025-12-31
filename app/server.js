@@ -23,7 +23,13 @@ const {
   getActiveRoom
 } = require("./db");
 const {
-  initialBoard, computeMoves, applyMove, serializeMoveMap, hasAnyPieces, colorOf
+  initialBoard,
+  computeMoves,
+  applyMove,
+  serializeMoveMap,
+  hasAnyPieces,
+  colorOf,
+  moveSignature
 } = require("./game");
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -207,12 +213,13 @@ async function main() {
   const MAX_GLOBAL_MSGS = 200;
 
   function computeRoomState(room) {
-    const moves = computeMoves(room.board, room.turn);
-    room.forced = moves.forced;
-    room.moveMap = serializeMoveMap([...moves.captures, ...moves.normals]);
-    room.captureMap = serializeMoveMap(moves.captures);
-    room.availableCaptures = moves.captures;
-    room.availableNormals = moves.normals;
+    const generated = computeMoves(room.board, room.turn);
+    room.forced = generated.forced;
+    room.legalMoves = generated.moves;
+    room.availableCaptures = generated.captures;
+    room.availableNormals = generated.normals;
+    room.moveMap = serializeMoveMap(room.legalMoves);
+    room.captureMap = serializeMoveMap(room.availableCaptures);
   }
 
   function makeRoomState({ code, name, mode, redUser, blackUser, ai = false, difficulty = null }) {
@@ -264,6 +271,7 @@ async function main() {
       forced: room.forced,
       moveMap: room.moveMap,
       captureMap: room.captureMap,
+      legalMoves: room.legalMoves || [],
       players: {
         red: room.players.red ? { id: room.players.red.id, username: room.players.red.username } : null,
         black: room.players.black ? { id: room.players.black.id, username: room.players.black.username } : (room.ai ? { username: "AI" } : null)
@@ -429,8 +437,7 @@ async function main() {
   function pickRandomMove(room) {
     const pool = room.availableCaptures.length > 0 ? room.availableCaptures : room.availableNormals;
     if (!pool || pool.length === 0) return null;
-    const mv = pool[Math.floor(Math.random() * pool.length)];
-    return { from: mv.from, path: mv.path };
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   async function maybePlayAI(room) {
@@ -442,9 +449,8 @@ async function main() {
     const m = pickRandomMove(room);
     if (!m) return;
 
-    const move = { from: m.from, path: m.path, captures: [] };
-    room.board = applyMove(room.board, move);
-    room.lastMove = { color: "black", path: move.path };
+    room.board = applyMove(room.board, m);
+    room.lastMove = { color: "black", move: m };
     room.turn = "red";
 
     const chk = recompute(room);
@@ -622,7 +628,34 @@ async function main() {
       await cleanupRoom(room, closureReason, uid);
     });
 
-    socket.on("move", async ({ code, path }) => {
+    function normalizeMovePayload(raw) {
+      if (!raw || !Array.isArray(raw.path) || raw.path.length < 2) return null;
+      const path = raw.path.map((p) => ({
+        r: Number(p.r ?? p[0]),
+        c: Number(p.c ?? p[1])
+      }));
+      if (path.some((p) => Number.isNaN(p.r) || Number.isNaN(p.c))) return null;
+      const captures = Array.isArray(raw.captures) ? raw.captures.map((c) => {
+        const cr = Number(c.coord?.r ?? c.r ?? c[0]);
+        const cc = Number(c.coord?.c ?? c.c ?? c[1]);
+        if (Number.isNaN(cr) || Number.isNaN(cc)) return null;
+        return {
+          coord: { r: cr, c: cc },
+          pieceType: c.pieceType === "king" ? "king" : "man",
+          color: c.color === "black" ? "black" : "red"
+        };
+      }).filter(Boolean) : [];
+      return {
+        pieceFrom: path[0],
+        pieceTo: path[path.length - 1],
+        path,
+        captures,
+        isCapture: captures.length > 0,
+        promotes: !!raw.promotes
+      };
+    }
+
+    socket.on("move", async ({ code, move }) => {
       const room = rooms.get(code);
       if (!room) return;
       if (room.over) return;
@@ -631,28 +664,27 @@ async function main() {
       if (!userId) return socket.emit("err", { error: "no_auth" });
       if (!isUsersTurn(room, userId)) return socket.emit("err", { error: "not_your_turn" });
 
-      if (!Array.isArray(path) || path.length < 2) return socket.emit("err", { error: "bad_move" });
+      const parsedMove = normalizeMovePayload(move);
+      if (!parsedMove) return socket.emit("err", { error: "bad_move" });
 
       if (room.pendingBlow && room.turn === ensurePlayer(room)) {
         room.pendingBlow = null;
       }
 
-      const moves = computeMoves(room.board, room.turn);
-      const allMoves = [...moves.captures, ...moves.normals];
-      const match = allMoves.find((m) => JSON.stringify(m.path) === JSON.stringify(path));
+      const generated = computeMoves(room.board, room.turn);
+      const legalMoves = generated.moves;
+      const match = legalMoves.find((m) => moveSignature(m) === moveSignature(parsedMove));
       if (!match) return socket.emit("err", { error: "illegal_move" });
 
-      const isCapture = moves.captures.some((m) => JSON.stringify(m.path) === JSON.stringify(path));
-      const skippedCapture = moves.captures.length > 0 && !isCapture;
+      const skippedCapture = generated.captures.length > 0 && !match.isCapture;
 
-      const [sr, sc] = path[0];
-      room.board = applyMove(room.board, { from: [sr, sc], path });
-      room.lastMove = { color: room.turn, path };
+      room.board = applyMove(room.board, match);
+      room.lastMove = { color: room.turn, move: match };
 
       const prevTurn = room.turn;
       room.turn = (room.turn === "red") ? "black" : "red";
       room.pendingBlow = skippedCapture ? {
-        target: path[path.length - 1],
+        target: [match.pieceTo.r, match.pieceTo.c],
         pieceColor: prevTurn,
         offeredTo: room.turn,
         ts: Date.now()

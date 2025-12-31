@@ -1,3 +1,13 @@
+const DIAGONALS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+function coord(r, c) {
+  return { r, c };
+}
+
+function coordKey(c) {
+  return `${c.r},${c.c}`;
+}
+
 function cloneBoard(board) {
   return board.map(row => row.slice());
 }
@@ -21,13 +31,14 @@ function inBounds(r, c) {
 function isKing(v) { return Math.abs(v) === 2; }
 function colorOf(v) { return v > 0 ? "red" : (v < 0 ? "black" : null); }
 
-function dirsForPiece(v, mode) {
+function dirsForPiece(v, { capture = false } = {}) {
   const king = isKing(v);
   const col = colorOf(v);
   if (!col) return [];
-  // siempre direcciones unitarias; la distancia se calcula en el consumidor
-  if (king) return [[-1,-1],[-1,1],[1,-1],[1,1]];
-  return col === "red" ? [[-1,-1],[-1,1]] : [[1,-1],[1,1]];
+  if (king) return DIAGONALS;
+  // Peones: movimiento normal hacia adelante, captura en todas las diagonales (regla española/portuguesa)
+  if (capture) return DIAGONALS;
+  return col === "red" ? [[-1, -1], [-1, 1]] : [[1, -1], [1, 1]];
 }
 
 function opponentColor(col) { return col === "red" ? "black" : "red"; }
@@ -43,115 +54,64 @@ function promoteIfNeeded(v) {
   return (Math.abs(v) === 1) ? (v > 0 ? 2 : -2) : v;
 }
 
-function computeCapturesFrom(board, fromR, fromC) {
-  const v = board[fromR][fromC];
+function capturedMeta(board, r, c) {
+  const val = board[r][c];
+  return {
+    coord: coord(r, c),
+    pieceType: isKing(val) ? "king" : "man",
+    color: colorOf(val)
+  };
+}
+
+function buildMove({ piece, path, captures }) {
+  const last = path[path.length - 1];
+  return {
+    pieceFrom: path[0],
+    pieceTo: last,
+    path,
+    captures,
+    isCapture: captures.length > 0,
+    promotes: !isKing(piece) && wouldPromote(piece, last.r)
+  };
+}
+
+function generateManCaptureSequences(board, from) {
+  const v = board[from.r][from.c];
   const col = colorOf(v);
   if (!col) return [];
 
-  // Reyes voladores: pueden capturar a distancia
-  if (isKing(v)) {
-    const results = [];
-    const start = { r: fromR, c: fromC, board: cloneBoard(board), path: [[fromR, fromC]], caps: [] };
-
-    function dfs(node) {
-      const piece = node.board[node.r][node.c];
-      let extended = false;
-
-      for (const [dr, dc] of dirsForPiece(piece)) {
-        let enemyR = null;
-        let enemyC = null;
-        for (let step = 1; step < 8; step++) {
-          const nr = node.r + dr * step;
-          const nc = node.c + dc * step;
-          if (!inBounds(nr, nc)) break;
-          const cell = node.board[nr][nc];
-          if (cell === 0) {
-            if (enemyR !== null) {
-              // aterrizajes posibles después de un enemigo
-              const nb = cloneBoard(node.board);
-              nb[node.r][node.c] = 0;
-              nb[enemyR][enemyC] = 0;
-              nb[nr][nc] = piece;
-              dfs({
-                r: nr,
-                c: nc,
-                board: nb,
-                path: node.path.concat([[nr, nc]]),
-                caps: node.caps.concat([[enemyR, enemyC]])
-              });
-              extended = true;
-            }
-            continue;
-          }
-
-          // pieza encontrada
-          const cellColor = colorOf(cell);
-          if (cellColor === col) break; // bloqueado por propia
-          if (cellColor === opponentColor(col)) {
-            if (enemyR !== null) break; // ya había una en esta diagonal
-            enemyR = nr;
-            enemyC = nc;
-            continue;
-          }
-        }
-      }
-
-      if (!extended && node.caps.length > 0) {
-        results.push({ from: [fromR, fromC], path: node.path, captures: node.caps });
-      }
-    }
-
-    dfs(start);
-    return results;
-  }
-
   const results = [];
-  const start = { r: fromR, c: fromC, board: cloneBoard(board), path: [[fromR, fromC]], caps: [] };
+  const start = { r: from.r, c: from.c, board: cloneBoard(board), caps: [], path: [from] };
 
   function dfs(node) {
-    const piece = node.board[node.r][node.c];
-    const canCrownNow = wouldPromote(piece, node.r);
-
-    // Regla American/English: si llegas a la fila de coronación, coronas al FINAL y no sigues capturando en ese turno.
-    if (canCrownNow && node.path.length > 1) {
-      results.push({ from: [fromR, fromC], path: node.path, captures: node.caps });
-      return;
-    }
-
-    const dirs = dirsForPiece(piece);
     let extended = false;
+    for (const [dr, dc] of dirsForPiece(v, { capture: true })) {
+      const midR = node.r + dr;
+      const midC = node.c + dc;
+      const landR = midR + dr;
+      const landC = midC + dc;
+      if (!inBounds(midR, midC) || !inBounds(landR, landC)) continue;
+      const mid = node.board[midR][midC];
+      if (mid === 0 || colorOf(mid) !== opponentColor(col)) continue;
+      if (node.board[landR][landC] !== 0) continue;
 
-    for (const [dr, dc] of dirs) {
-      // dr/dc are unit steps; land two steps away when jumping
-      const enemyR = node.r + dr;
-      const enemyC = node.c + dc;
-      const landingR = enemyR + dr;
-      const landingC = enemyC + dc;
-      if (!inBounds(landingR, landingC) || !inBounds(enemyR, enemyC)) continue;
-      const mid = node.board[enemyR][enemyC];
-      if (mid === 0) continue;
-      if (colorOf(mid) !== opponentColor(colorOf(piece))) continue;
-      if (node.board[landingR][landingC] !== 0) continue;
-
-      // aplicar salto
       const nb = cloneBoard(node.board);
       nb[node.r][node.c] = 0;
-      nb[enemyR][enemyC] = 0;
-      nb[landingR][landingC] = piece;
+      nb[midR][midC] = 0;
+      nb[landR][landC] = v;
 
       dfs({
-        r: landingR,
-        c: landingC,
+        r: landR,
+        c: landC,
         board: nb,
-        path: node.path.concat([[landingR, landingC]]),
-        caps: node.caps.concat([[enemyR, enemyC]])
+        caps: node.caps.concat([capturedMeta(node.board, midR, midC)]),
+        path: node.path.concat([coord(landR, landC)])
       });
-
       extended = true;
     }
 
-    if (!extended && node.path.length > 1) {
-      results.push({ from: [fromR, fromC], path: node.path, captures: node.caps });
+    if (!extended && node.caps.length > 0) {
+      results.push(buildMove({ piece: v, path: node.path, captures: node.caps }));
     }
   }
 
@@ -159,84 +119,154 @@ function computeCapturesFrom(board, fromR, fromC) {
   return results;
 }
 
-function computeMoves(board, turnColor) {
-  // 1) capturas obligatorias
+function generateKingCaptureSequences(board, from) {
+  const v = board[from.r][from.c];
+  const col = colorOf(v);
+  if (!col || !isKing(v)) return [];
+
+  const results = [];
+  const start = { r: from.r, c: from.c, board: cloneBoard(board), caps: [], path: [from] };
+
+  function dfs(node) {
+    let extended = false;
+    for (const [dr, dc] of dirsForPiece(v, { capture: true })) {
+      let enemy = null;
+      let step = 1;
+      while (true) {
+        const nr = node.r + dr * step;
+        const nc = node.c + dc * step;
+        if (!inBounds(nr, nc)) break;
+        const cell = node.board[nr][nc];
+        if (cell === 0) {
+          if (enemy) {
+            // aterrizaje detrás de la captura
+            const nb = cloneBoard(node.board);
+            nb[node.r][node.c] = 0;
+            nb[enemy.r][enemy.c] = 0;
+            nb[nr][nc] = v;
+            dfs({
+              r: nr,
+              c: nc,
+              board: nb,
+              caps: node.caps.concat([capturedMeta(node.board, enemy.r, enemy.c)]),
+              path: node.path.concat([coord(nr, nc)])
+            });
+            extended = true;
+          }
+          step += 1;
+          continue;
+        }
+
+        const cellColor = colorOf(cell);
+        if (cellColor === col) break; // bloqueado
+        if (cellColor === opponentColor(col)) {
+          if (enemy) break; // dos piezas en la misma diagonal -> no se puede
+          enemy = { r: nr, c: nc };
+          step += 1;
+          continue;
+        }
+      }
+    }
+
+    if (!extended && node.caps.length > 0) {
+      results.push(buildMove({ piece: v, path: node.path, captures: node.caps }));
+    }
+  }
+
+  dfs(start);
+  return results;
+}
+
+function generateAllCaptures(board, color) {
   const captures = [];
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const v = board[r][c];
-      if (v === 0) continue;
-      if (colorOf(v) !== turnColor) continue;
-      captures.push(...computeCapturesFrom(board, r, c));
+      if (v === 0 || colorOf(v) !== color) continue;
+      const from = coord(r, c);
+      if (isKing(v)) {
+        captures.push(...generateKingCaptureSequences(board, from));
+      } else {
+        captures.push(...generateManCaptureSequences(board, from));
+      }
     }
   }
+  return captures;
+}
 
-  // 2) movimientos normales
-  const normals = [];
+function generateNormalMoves(board, color) {
+  const moves = [];
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const v = board[r][c];
-      if (v === 0) continue;
-      if (colorOf(v) !== turnColor) continue;
+      if (v === 0 || colorOf(v) !== color) continue;
+      const from = coord(r, c);
       if (isKing(v)) {
         for (const [dr, dc] of dirsForPiece(v)) {
           for (let step = 1; step < 8; step++) {
-            const tr = r + dr * step, tc = c + dc * step;
+            const tr = r + dr * step;
+            const tc = c + dc * step;
             if (!inBounds(tr, tc)) break;
             if (board[tr][tc] !== 0) break;
-            normals.push({ from: [r, c], path: [[r, c], [tr, tc]], captures: [] });
+            const path = [from, coord(tr, tc)];
+            moves.push(buildMove({ piece: v, path, captures: [] }));
           }
         }
       } else {
         for (const [dr, dc] of dirsForPiece(v)) {
-          const tr = r + dr, tc = c + dc;
+          const tr = r + dr;
+          const tc = c + dc;
           if (!inBounds(tr, tc)) continue;
           if (board[tr][tc] !== 0) continue;
-          normals.push({ from: [r, c], path: [[r, c], [tr, tc]], captures: [] });
+          const path = [from, coord(tr, tc)];
+          moves.push(buildMove({ piece: v, path, captures: [] }));
         }
       }
     }
   }
+  return moves;
+}
 
-  const forced = captures.length > 0;
-  // compat: moves sigue devolviendo solo las opciones legales "preferidas"
-  const moves = forced ? captures : normals;
-  return { forced, moves, captures, normals };
+function filterByQuantityAndQuality(captures) {
+  if (captures.length === 0) return [];
+  const maxCaptured = Math.max(...captures.map(m => m.captures.length));
+  const withMax = captures.filter(m => m.captures.length === maxCaptured);
+  const maxKings = Math.max(...withMax.map(m => m.captures.filter(c => c.pieceType === "king").length));
+  return withMax.filter(m => m.captures.filter(c => c.pieceType === "king").length === maxKings);
+}
+
+function computeMoves(board, turnColor) {
+  const captures = generateAllCaptures(board, turnColor);
+  const filteredCaptures = filterByQuantityAndQuality(captures);
+  const forced = filteredCaptures.length > 0;
+  const normals = forced ? [] : generateNormalMoves(board, turnColor);
+  const moves = forced ? filteredCaptures : normals;
+  return { forced, moves, captures: filteredCaptures, normals };
 }
 
 function applyMove(board, move) {
   const b = cloneBoard(board);
-  const [sr, sc] = move.path[0];
-  let piece = b[sr][sc];
-  b[sr][sc] = 0;
+  const { pieceFrom, pieceTo, captures, promotes } = move;
+  let piece = b[pieceFrom.r][pieceFrom.c];
+  b[pieceFrom.r][pieceFrom.c] = 0;
 
-  for (let i = 1; i < move.path.length; i++) {
-    const [pr, pc] = move.path[i - 1];
-    const [nr, nc] = move.path[i];
-    const dr = Math.sign(nr - pr);
-    const dc = Math.sign(nc - pc);
-    // eliminar cualquier pieza en el camino diagonal (en un movimiento legal solo habrá oponentes)
-    let cr = pr + dr, cc = pc + dc;
-    while (cr !== nr || cc !== nc) {
-      if (b[cr][cc] !== 0) b[cr][cc] = 0;
-      cr += dr;
-      cc += dc;
-    }
+  for (const cap of captures) {
+    b[cap.coord.r][cap.coord.c] = 0;
   }
 
-  const [er, ec] = move.path[move.path.length - 1];
-  if (wouldPromote(piece, er)) piece = promoteIfNeeded(piece);
-  b[er][ec] = piece;
-
+  if (promotes || wouldPromote(piece, pieceTo.r)) {
+    piece = promoteIfNeeded(piece);
+  }
+  b[pieceTo.r][pieceTo.c] = piece;
   return b;
 }
 
 function serializeMoveMap(moves) {
   const map = {};
   for (const m of moves) {
-    const k = `${m.from[0]},${m.from[1]}`;
+    const k = coordKey(m.pieceFrom);
     if (!map[k]) map[k] = [];
-    map[k].push(m.path);
+    map[k].push(m);
   }
   return map;
 }
@@ -249,11 +279,22 @@ function hasAnyPieces(board, col) {
   return false;
 }
 
+function moveSignature(move) {
+  const pathSig = move.path.map(p => `${p.r},${p.c}`).join("|");
+  const capsSig = move.captures.map(c => `${c.coord.r},${c.coord.c},${c.pieceType},${c.color}`).join("|");
+  return `${pathSig}#${capsSig}`;
+}
+
 module.exports = {
   initialBoard,
   computeMoves,
   applyMove,
   serializeMoveMap,
   hasAnyPieces,
-  colorOf
+  colorOf,
+  coord,
+  coordKey,
+  moveSignature,
+  generateKingCaptureSequences,
+  generateManCaptureSequences
 };
