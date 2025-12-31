@@ -1,6 +1,18 @@
-:root { font-family: 'Inter', system-ui, Segoe UI, Roboto, Arial; }
+:root {
+  font-family: 'Inter', system-ui, Segoe UI, Roboto, Arial;
+  --board-size: clamp(320px, 62vw, 520px);
+  --board-safe-area: 320px;
+  --board-mobile-size: clamp(260px, 86vw, 420px);
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: #0f1115; color: #e7e7e7; }
+html, body { min-height: 100%; }
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #e7e7e7;
+  display: flex;
+  flex-direction: column;
+}
 .hidden { display: none !important; }
 
 a { color: #8cb4ff; }
@@ -11,15 +23,16 @@ a { color: #8cb4ff; }
 .top-actions { display:flex; gap: 12px; align-items:center; }
 .versionBadge { background:#0f1115; border:1px solid #2a3242; border-radius: 12px; padding: 6px 10px; font-size: 12px; opacity:.9; }
 
-.wrap { padding: 18px; max-width: 1480px; margin: 0 auto 32px; }
+.wrap { padding: 18px; max-width: 1480px; margin: 0 auto 32px; width: 100%; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .grid { display:grid; gap: 16px; }
 .tabButtons { display:flex; gap: 8px; flex-wrap: wrap; }
 .tabBtn { background:#1a1f2c; border:1px solid #2a3242; color:#e7e7e7; }
 .tabBtn.active { border-color:#2b6cff; box-shadow: 0 0 0 1px rgba(43,108,255,.4); }
 .tabPanel { display:none; }
 .tabPanel.active { display:block; }
-.gameLayout { display:flex; flex-direction: column; gap: 16px; }
-.gameGrid { display:grid; grid-template-columns: 320px 1.25fr 360px; gap: 16px; align-items:start; }
+#mainApp { flex: 1; display: flex; flex-direction: column; }
+.gameLayout { display:flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; }
+.gameGrid { display:grid; grid-template-columns: 320px 1.25fr 360px; gap: 16px; align-items:start; flex: 1; min-height: 0; align-content: start; }
 .boardColumn { display:flex; flex-direction: column; gap: 14px; }
 .card { background:#151a22; border:1px solid #232a36; border-radius: 14px; padding: 14px; box-shadow: 0 10px 22px rgba(0,0,0,.25); }
 h2 { margin: 0; font-size: 18px; }
@@ -53,8 +66,9 @@ button.danger { background: #e04f5f; }
 
 .boardCard { text-align: center; }
 .board {
-  width: min(760px, 96vw);
-  height: min(760px, 96vw);
+  --board-length: min(var(--board-size), calc(100vh - var(--board-safe-area)), 96vw);
+  width: var(--board-length);
+  height: var(--board-length);
   margin: 10px auto;
   display:grid;
   grid-template-columns: repeat(8, 1fr);
@@ -102,7 +116,7 @@ button.danger { background: #e04f5f; }
 .routeBadge.optional { background:#3a2a18; color:#ffd580; }
 .capturePreview { margin: 6px 0; }
 
-.lowerPanel { position: sticky; bottom: 0; padding-top: 12px; display:flex; flex-direction: column; gap: 10px; }
+.lowerPanel { position: sticky; bottom: 0; padding-top: 12px; display:flex; flex-direction: column; gap: 10px; margin-top: auto; z-index: 2; }
 .lowerHeader { display:flex; justify-content: space-between; align-items:center; gap: 10px; flex-wrap: wrap; }
 .lowerTabs { flex: 1; }
 .lowerActions { display:flex; align-items:center; gap: 8px; }
@@ -124,6 +138,8 @@ button.danger { background: #e04f5f; }
 
 body.inRoom .lowerPanel { border-color:#2a3242; box-shadow: 0 12px 20px rgba(0,0,0,.35); }
 body.inRoom #focusPill { opacity:1; }
+body.inRoom { --board-safe-area: 260px; }
+body:not(.inRoom) { --board-safe-area: 340px; }
 
 @media (max-width: 1280px) {
   .gameGrid { grid-template-columns: 300px 1fr 340px; }
@@ -132,19 +148,28 @@ body.inRoom #focusPill { opacity:1; }
 @media (max-width: 1100px) {
   .gameGrid { grid-template-columns: 1fr; }
   .movesCard { position: relative; top: 0; }
-  .board { width: min(520px, 96vw); height: min(520px, 96vw); }
+  :root { --board-size: clamp(300px, 76vw, 500px); }
   .topbar { position: static; }
-  .lowerPanel { position: relative; }
+  .lowerPanel { position: sticky; }
   .mobileOnly { display:block; }
 }
 
+@media (max-width: 820px) {
+  :root { --board-size: clamp(260px, 82vw, 440px); }
+  body.inRoom { --board-safe-area: 230px; }
+  body:not(.inRoom) { --board-safe-area: 300px; }
+}
+
 @media (max-width: 640px) {
+  :root { --board-size: var(--board-mobile-size); }
+  body { --board-safe-area: 260px; }
+  body:not(.inRoom) { --board-safe-area: 260px; }
+  body.inRoom { --board-safe-area: 220px; }
   .movesCard.collapsed #capturePreview,
   .movesCard.collapsed #routeOptions {
     display:none;
   }
   .movesCard { border:2px solid #232a36; }
   .movePanelActions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
-  .lowerPanel { position: fixed; left: 10px; right: 10px; bottom: 10px; max-height: 70vh; overflow: auto; z-index: 9; }
-  .lowerPanel.collapsed { max-height: unset; }
+  .lowerPanel { position: sticky; left: unset; right: unset; bottom: 0; max-height: none; overflow: visible; }
 }

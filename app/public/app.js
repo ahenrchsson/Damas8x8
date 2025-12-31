@@ -66,6 +66,7 @@ const lowerContent = $("lowerContent");
 const toggleLowerPanel = $("toggleLowerPanel");
 const tabButtons = document.querySelectorAll(".lowerTabBtn");
 const tabPanels = document.querySelectorAll(".tabPanel");
+let lastFocusMode = false;
 
 let me = null;
 let socket = null;
@@ -84,11 +85,19 @@ let mobileMovesCollapsed = false;
 let panelCollapsed = false;
 let activeTab = "lobbyPanel";
 
-function switchTab(tabId) {
+function hasActiveGame() {
+  if (state && currentRoom) return true;
+  if (state?.status === "playing") return true;
+  if (resumeCode) return true;
+  return false;
+}
+
+function switchTab(tabId, opts = {}) {
+  const keepCollapsed = opts.keepCollapsed || false;
   activeTab = tabId;
   tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tabId));
   tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
-  if (lowerPanel && panelCollapsed) {
+  if (lowerPanel && panelCollapsed && !keepCollapsed) {
     setPanelCollapsed(false);
   }
 }
@@ -134,16 +143,20 @@ function setAuthUI(logged) {
 }
 
 function updateFocusMode(inRoom) {
-  document.body.classList.toggle("inRoom", inRoom);
+  const active = !!inRoom || hasActiveGame();
+  document.body.classList.toggle("inRoom", active);
   if (focusPill) {
-    focusPill.textContent = inRoom ? "Game Focus activo" : "Modo lobby";
-    focusPill.classList.toggle("success", inRoom);
-    focusPill.classList.toggle("ghost", !inRoom);
+    focusPill.textContent = active ? "Game Focus activo" : "Modo lobby";
+    focusPill.classList.toggle("success", active);
+    focusPill.classList.toggle("ghost", !active);
   }
-  if (!inRoom) {
+  if (!active) {
     switchTab("lobbyPanel");
-    if (window.innerWidth < 760) setPanelCollapsed(true);
+    setPanelCollapsed(window.innerWidth < 760);
+  } else if (!lastFocusMode) {
+    setPanelCollapsed(true);
   }
+  lastFocusMode = active;
 }
 
 function updateChatControls() {
@@ -208,6 +221,7 @@ function initSocket() {
     resumeCode = code;
     resumeInfo.textContent = `${name} (${code})`;
     resumeModal.classList.remove("hidden");
+    updateFocusMode(false);
   });
 
   socket.on("roomCreated", ({ code }) => {
@@ -218,12 +232,13 @@ function initSocket() {
     const prevRoom = currentRoom;
     const wasInRoom = !!state;
     state = { ...st, messages: st.messages || [] };
+    resumeCode = null;
     currentRoom = st.code;
     const myColor = getMyColor();
     currentRole = myColor ? "player" : "observer";
     updateFocusMode(true);
     if (!wasInRoom || prevRoom !== st.code || activeTab === "lobbyPanel") {
-      switchTab("matchPanel");
+      switchTab("matchPanel", { keepCollapsed: true });
     }
     roomCode.textContent = st.code;
     turnTxt.textContent = `Turno: ${st.turn}`;
@@ -242,7 +257,6 @@ function initSocket() {
       const spectators = st.observers || 0;
       matchMeta.textContent = `${modeTxt} • Observadores: ${spectators} • Turno #${st.turnCount || 1}`;
     }
-    setPanelCollapsed(false);
     selection = null;
     committedMove = null;
     hoverMove = null;
@@ -677,6 +691,7 @@ function clearRoomState() {
   committedMove = null;
   hoverMove = null;
   boardCells = [];
+  resumeCode = null;
   boardEl.innerHTML = "";
   roomCode.textContent = "—";
   turnTxt.textContent = "Turno: —";
@@ -806,10 +821,13 @@ btnCloseRanking.onclick = () => drawer.classList.add("hidden");
 btnResume.onclick = () => {
   if (resumeCode) socket.emit("rejoinRoom", { code: resumeCode });
   resumeModal.classList.add("hidden");
+  updateFocusMode(true);
 };
 btnSkipResume.onclick = () => {
   if (resumeCode) socket.emit("declineResume", { code: resumeCode });
+  resumeCode = null;
   resumeModal.classList.add("hidden");
+  updateFocusMode(false);
 };
 
 async function refreshLeaderboard() {
@@ -852,10 +870,10 @@ window.addEventListener("resize", () => {
     mobileMovesCollapsed = false;
     movesCard?.classList.remove("collapsed");
   }
-  if (window.innerWidth < 760 && !state) {
+  if (window.innerWidth < 760 && !hasActiveGame()) {
     setPanelCollapsed(true);
   }
-  if (window.innerWidth > 840 && state && panelCollapsed) {
+  if (window.innerWidth > 840 && !hasActiveGame() && panelCollapsed) {
     setPanelCollapsed(false);
   }
 });
