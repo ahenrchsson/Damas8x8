@@ -12,6 +12,7 @@
     <div class="top-actions">
       <button id="btnRanking" class="ghost">Ranking Global</button>
       <div id="meBox" class="me"></div>
+      <div id="versionBadge" class="versionBadge">v1.0.1</div>
     </div>
   </div>
 
@@ -30,12 +31,15 @@
     </div>
 
     <div id="mainApp" class="hidden">
-      <div class="grid lobby-grid">
-        <div class="card">
-          <div class="cardHeader">
-            <h2>Lobby de salas PvP</h2>
-            <span id="lobbyStatus" class="pill">Tiempo real</span>
+      <div class="card lobbyCard">
+        <div class="cardHeader lobbyTabs">
+          <div class="tabButtons">
+            <button class="tabBtn active" data-tab="lobbyPanel">Lobby PvP</button>
+            <button class="tabBtn" data-tab="globalPanel">Chat global</button>
           </div>
+          <span id="lobbyStatus" class="pill">Tiempo real</span>
+        </div>
+        <div class="tabPanel active" id="lobbyPanel">
           <div class="row">
             <input id="roomName" placeholder="Nombre opcional de sala"/>
             <button id="btnNewPvP" disabled>Crear sala PvP</button>
@@ -65,12 +69,7 @@
             </table>
           </div>
         </div>
-
-        <div class="card">
-          <div class="cardHeader">
-            <h2>Chat global</h2>
-            <span class="pill">Para todos</span>
-          </div>
+        <div class="tabPanel" id="globalPanel">
           <div id="globalChatLog" class="chatLog tall"></div>
           <div class="chatInputRow">
             <input id="globalChatInput" placeholder="Escribe a todos en el lobby" disabled />
@@ -79,7 +78,7 @@
         </div>
       </div>
 
-      <div class="grid game-grid">
+      <div class="gameShell">
         <div class="card controlsCard">
           <h2>Controles de partida</h2>
           <div class="infoLine">Sala: <span id="roomCode">—</span></div>
@@ -88,7 +87,7 @@
             <div class="player" id="playerBlack">⚫ Negro: —</div>
           </div>
           <div class="infoLine" id="turnTxt">Turno: —</div>
-          <div class="infoLine" id="forcedTxt">Capturas obligatorias: —</div>
+          <div class="infoLine" id="forcedTxt">Capturas recomendadas: —</div>
           <div class="infoLine" id="pendingTxt"></div>
           <div class="row stack">
             <button id="btnRequestDraw" disabled>Solicitar tablas</button>
@@ -98,40 +97,45 @@
           </div>
         </div>
 
-        <div class="card boardCard">
-          <div class="cardHeader">
-            <h2>Tablero</h2>
-            <span class="pill ghost" id="rolePill">Observando</span>
-          </div>
-          <div id="board" class="board"></div>
-          <div id="movePanel" class="movePanel hidden">
-            <div class="movePanelHeader">
-              <div>
-                <div class="movePanelTitle">Previsualización de ruta</div>
-                <div id="movePanelSummary" class="hint">Selecciona una ficha para ver opciones</div>
-              </div>
-              <div class="movePanelActions">
-                <button id="btnCancelMove" class="ghost">Cancelar</button>
-                <button id="btnConfirmMove" disabled>Confirmar</button>
-              </div>
+        <div class="boardColumn">
+          <div class="card boardCard">
+            <div class="cardHeader">
+              <h2>Tablero</h2>
+              <span class="pill ghost" id="rolePill">Observando</span>
             </div>
-            <div id="capturePreview" class="capturePreview hint"></div>
-            <div id="routeOptions" class="routeOptions"></div>
+            <div id="board" class="board"></div>
+            <div id="status" class="hint"></div>
           </div>
-          <div id="status" class="hint"></div>
+
+          <div class="card chatCard inlineChat">
+            <div class="cardHeader">
+              <h2>Chat de partida</h2>
+              <span class="pill ghost">Solo jugadores</span>
+            </div>
+            <div id="chatLog" class="chatLog"></div>
+            <div class="chatInputRow">
+              <input id="chatInput" placeholder="Solo dentro de la partida" disabled />
+              <button id="chatSend" disabled>Enviar</button>
+            </div>
+            <div class="hint">Observadores usan el chat global.</div>
+          </div>
         </div>
 
-        <div class="card chatCard">
-          <div class="cardHeader">
-            <h2>Chat de partida</h2>
-            <span class="pill ghost">Solo jugadores</span>
+        <div class="card movesCard">
+          <div class="movePanelHeader">
+            <div>
+              <div class="movePanelTitle">Panel de movimientos</div>
+              <div id="movePanelSummary" class="hint">Selecciona una ficha para ver opciones</div>
+            </div>
+            <div class="movePanelActions">
+              <button id="btnModifyMove" class="ghost">Modificar</button>
+              <button id="btnCancelMove" class="ghost">Cancelar</button>
+              <button id="btnConfirmMove" disabled>Confirmar</button>
+            </div>
           </div>
-          <div id="chatLog" class="chatLog"></div>
-          <div class="chatInputRow">
-            <input id="chatInput" placeholder="Solo dentro de la partida" disabled />
-            <button id="chatSend" disabled>Enviar</button>
-          </div>
-          <div class="hint">Observadores usan el chat global.</div>
+          <div id="movePanelMobileHint" class="hint mobileOnly">Desliza o pulsa para abrir/cerrar en móvil.</div>
+          <div id="capturePreview" class="capturePreview hint"></div>
+          <div id="routeOptions" class="routeOptions"></div>
         </div>
       </div>
     </div>

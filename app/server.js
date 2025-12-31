@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const fs = require("fs");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const session = require("express-session");
@@ -20,7 +21,9 @@ const {
   upsertRating,
   setActiveRoom,
   clearActiveRoom,
-  getActiveRoom
+  getActiveRoom,
+  getUserPrefs,
+  setUserPrefs
 } = require("./db");
 const {
   initialBoard,
@@ -32,6 +35,13 @@ const {
   moveSignature
 } = require("./game");
 
+let VERSION = "v1.0.1";
+try {
+  const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
+  if (raw) VERSION = raw.trim();
+} catch (_) {
+  VERSION = "v1.0.1";
+}
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
 const TRUST_PROXY = (process.env.TRUST_PROXY || "false").toLowerCase() === "true";
@@ -48,6 +58,23 @@ function eloUpdate(rA, rB, scoreA, k = 32) {
     newA: Math.round(rA + k * (scoreA - expA)),
     newB: Math.round(rB + k * (scoreB - expB))
   };
+}
+
+function flipColor(color) {
+  return color === "red" ? "black" : "red";
+}
+
+async function nextColorPreference(userId, mode) {
+  const prefs = await getUserPrefs(pool, userId);
+  const field = mode === "ai" ? "last_color_ai" : "last_color_pvp";
+  const last = prefs?.[field] || null;
+  const next = last === "red" ? "black" : "red";
+  return { field, last, next };
+}
+
+async function persistColorPreference(userId, mode, color) {
+  const { field } = await nextColorPreference(userId, mode);
+  await setUserPrefs(pool, userId, { [field]: color });
 }
 
 async function main() {
@@ -160,6 +187,10 @@ async function main() {
     res.json({ leaderboard: rows });
   });
 
+  app.get("/api/version", (_req, res) => {
+    res.json({ version: VERSION });
+  });
+
   const closeRoomSchema = z.object({
     reason: z.enum(["leave", "finished", "surrender", "ai_exit"]).optional(),
     requestedBy: z.number().optional()
@@ -217,12 +248,14 @@ async function main() {
     room.forced = generated.forced;
     room.legalMoves = generated.moves;
     room.availableCaptures = generated.captures;
+    room.allCaptures = generated.allCaptures;
     room.availableNormals = generated.normals;
     room.moveMap = serializeMoveMap(room.legalMoves);
-    room.captureMap = serializeMoveMap(room.availableCaptures);
+    room.captureMap = serializeMoveMap(room.allCaptures);
+    room.recommendedCaptureMap = serializeMoveMap(room.availableCaptures);
   }
 
-  function makeRoomState({ code, name, mode, redUser, blackUser, ai = false, difficulty = null }) {
+  function makeRoomState({ code, name, mode, players, ai = false, aiColor = null, difficulty = null }) {
     const board = initialBoard();
     const turn = "red"; // rojo parte
     const room = {
@@ -233,21 +266,23 @@ async function main() {
       createdAt: Date.now(),
       board,
       turn,
+      turnCount: 1,
       forced: false,
       moveMap: {},
       captureMap: {},
+      recommendedCaptureMap: {},
+      allCaptures: [],
       availableCaptures: [],
       availableNormals: [],
-      players: {
-        red: redUser,   // { id, username, sid }
-        black: blackUser // idem o null si no llegó / IA
-      },
+      players: players || { red: null, black: null },
       observers: new Map(), // socketId -> { username }
       ai,
+      aiColor,
       lastMove: null,
       over: false,
       pendingDraw: null,
       pendingBlow: null,
+      missedCapture: null,
       messages: []
     };
     computeRoomState(room);
@@ -271,6 +306,7 @@ async function main() {
       forced: room.forced,
       moveMap: room.moveMap,
       captureMap: room.captureMap,
+      recommendedCaptureMap: room.recommendedCaptureMap,
       legalMoves: room.legalMoves || [],
       players: {
         red: room.players.red ? { id: room.players.red.id, username: room.players.red.username } : null,
@@ -280,6 +316,8 @@ async function main() {
       over: room.over,
       pendingDraw: room.pendingDraw,
       pendingBlow: room.pendingBlow,
+      missedCapture: room.missedCapture,
+      aiColor: room.aiColor,
       observers: room.observers.size,
       status: roomStatus(room),
       messages: room.messages.slice(-MAX_ROOM_MSGS).map(m => ({
@@ -436,7 +474,9 @@ async function main() {
 
   function pickRandomMove(board, color) {
     const generated = computeMoves(board, color);
-    const pool = generated.moves;
+    const hasCaptures = generated.allCaptures?.length > 0;
+    const prioritized = hasCaptures ? (generated.captures?.length ? generated.captures : generated.allCaptures) : generated.normals;
+    const pool = prioritized && prioritized.length ? prioritized : generated.moves;
     if (!pool || pool.length === 0) return { move: null, generated };
     return {
       move: pool[Math.floor(Math.random() * pool.length)],
@@ -446,10 +486,11 @@ async function main() {
 
   async function maybePlayAI(room) {
     if (!room.ai || room.over) return;
-    if (room.turn !== "black") return;
+    if (room.turn !== room.aiColor) return;
 
     room.pendingBlow = null;
     room.pendingDraw = null;
+    room.missedCapture = null;
     const { move, generated } = pickRandomMove(room.board, room.turn);
     const legalMoves = generated.moves || [];
     if (!move) return;
@@ -459,12 +500,13 @@ async function main() {
       console.warn("AI generated illegal move, retrying");
       if (legalMoves.length === 0) return;
       room.board = applyMove(room.board, legalMoves[0]);
-      room.lastMove = { color: "black", move: legalMoves[0] };
+      room.lastMove = { color: room.aiColor, move: legalMoves[0] };
     } else {
       room.board = applyMove(room.board, match);
-      room.lastMove = { color: "black", move: match };
+      room.lastMove = { color: room.aiColor, move: match };
     }
-    room.turn = "red";
+    room.turn = flipColor(room.turn);
+    room.turnCount += 1;
 
     const chk = recompute(room);
     io.to(room.code).emit("state", publicStateFor(room));
@@ -541,23 +583,38 @@ async function main() {
       }
 
       const code = nanoid(6).toUpperCase();
-      const redUser = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
-
-      let room;
+      const hostUser = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
+      const hostPref = await nextColorPreference(userId, mode === "ai" ? "ai" : "pvp");
+      const hostColor = hostPref.next;
+      const opponentColor = flipColor(hostColor);
+      const players = { red: null, black: null };
+      players[hostColor] = hostUser;
       if (mode === "ai") {
-        room = makeRoomState({ code, name, mode: "ai", redUser, blackUser: null, ai: true, difficulty });
-      } else {
-        room = makeRoomState({ code, name, mode: "pvp", redUser, blackUser: null, ai: false });
+        players[opponentColor] = { username: "AI" };
+      }
+
+      const room = makeRoomState({
+        code,
+        name,
+        mode: mode === "ai" ? "ai" : "pvp",
+        players,
+        ai: mode === "ai",
+        aiColor: mode === "ai" ? opponentColor : null,
+        difficulty: mode === "ai" ? difficulty : null
+      });
+      if (mode === "pvp") {
+        room.colorPlan = { hostPreferred: hostColor, hostId: userId };
       }
 
       rooms.set(code, room);
       socket.join(code);
-      userRoomMap.set(redUser.id, { code, color: "red" });
-      await setActiveRoom(pool, redUser.id, code, room.mode);
+      userRoomMap.set(hostUser.id, { code, color: hostColor });
+      await setActiveRoom(pool, hostUser.id, code, room.mode);
+      await persistColorPreference(hostUser.id, room.mode, hostColor);
       emitLobby();
       socket.emit("roomCreated", { code });
       sendState(room);
-      if (room.ai) maybePlayAI(room);
+      if (room.ai && room.turn === room.aiColor) maybePlayAI(room);
     });
 
     socket.on("joinRoom", async ({ code }) => {
@@ -567,8 +624,8 @@ async function main() {
       if (!room) return socket.emit("err", { error: "room_not_found" });
 
       if (room.mode !== "pvp" || room.ai) return socket.emit("err", { error: "room_not_joinable" });
-      if (room.players.black) return socket.emit("err", { error: "room_full" });
-      if (room.players.red?.id === socket.data.userId) return socket.emit("err", { error: "same_user" });
+      if (room.players.red?.id === socket.data.userId || room.players.black?.id === socket.data.userId) return socket.emit("err", { error: "same_user" });
+      if (room.players.red && room.players.black) return socket.emit("err", { error: "room_full" });
       const active = await getActiveRoom(pool, socket.data.userId);
       if (active) {
         if (rooms.has(active.room_code)) {
@@ -577,11 +634,21 @@ async function main() {
         await clearActiveRoom(pool, socket.data.userId);
       }
 
-      room.players.black = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
+      const guestPref = await nextColorPreference(socket.data.userId, "pvp");
+      const desiredColor = guestPref.next;
+      const hostPref = room.colorPlan?.hostPreferred || (room.players.red ? "red" : "black");
+      let joinColor = desiredColor;
+      if (room.players[joinColor]) {
+        joinColor = flipColor(joinColor);
+      }
+      if (room.players[joinColor]) return socket.emit("err", { error: "room_full" });
+
+      room.players[joinColor] = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
 
       socket.join(roomCode);
-      userRoomMap.set(socket.data.userId, { code: roomCode, color: "black" });
+      userRoomMap.set(socket.data.userId, { code: roomCode, color: joinColor });
       await setActiveRoom(pool, socket.data.userId, roomCode, room.mode);
+      await persistColorPreference(socket.data.userId, "pvp", joinColor);
       emitLobby();
       sendState(room);
     });
@@ -682,6 +749,7 @@ async function main() {
 
       if (room.pendingBlow && room.turn === ensurePlayer(room)) {
         room.pendingBlow = null;
+        room.missedCapture = null;
       }
 
       const generated = computeMoves(room.board, room.turn);
@@ -689,18 +757,28 @@ async function main() {
       const match = legalMoves.find((m) => moveSignature(m) === moveSignature(parsedMove));
       if (!match) return socket.emit("err", { error: "illegal_move" });
 
-      const skippedCapture = generated.captures.length > 0 && !match.isCapture;
+      const skippedCapture = (generated.allCaptures?.length || 0) > 0 && !match.isCapture;
 
       room.board = applyMove(room.board, match);
-      room.lastMove = { color: room.turn, move: match };
+      room.lastMove = { color: room.turn, move: match, missedCapture: skippedCapture ? true : false };
+      room.missedCapture = skippedCapture ? {
+        by: room.turn,
+        turn: room.turnCount,
+        piece: match.pieceFrom,
+        landing: match.pieceTo,
+        available: generated.allCaptures?.map((m) => m.captures) || [],
+        ts: Date.now()
+      } : null;
 
       const prevTurn = room.turn;
-      room.turn = (room.turn === "red") ? "black" : "red";
+      room.turn = flipColor(room.turn);
+      room.turnCount += 1;
       room.pendingBlow = skippedCapture ? {
         target: [match.pieceTo.r, match.pieceTo.c],
         pieceColor: prevTurn,
         offeredTo: room.turn,
-        ts: Date.now()
+        ts: Date.now(),
+        missedCapture: room.missedCapture
       } : null;
       room.pendingDraw = null; // limpiar solicitudes viejas al mover
 
@@ -738,6 +816,7 @@ async function main() {
         room.board[r][c] = 0;
       }
       room.pendingBlow = null;
+      room.missedCapture = null;
       const chk = recompute(room);
       sendState(room);
       if (chk.over) {

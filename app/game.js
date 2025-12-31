@@ -245,12 +245,12 @@ function filterByQuantityAndQuality(captures) {
 }
 
 function computeMoves(board, turnColor) {
-  const captures = generateAllCaptures(board, turnColor);
-  const filteredCaptures = filterByQuantityAndQuality(captures);
-  const forced = filteredCaptures.length > 0;
-  const normals = forced ? [] : generateNormalMoves(board, turnColor);
-  const moves = forced ? filteredCaptures : normals;
-  return { forced, moves, captures: filteredCaptures, normals };
+  const allCaptures = generateAllCaptures(board, turnColor);
+  const filteredCaptures = filterByQuantityAndQuality(allCaptures);
+  const forced = allCaptures.length > 0;
+  const normals = generateNormalMoves(board, turnColor);
+  const moves = allCaptures.concat(normals);
+  return { forced, moves, captures: filteredCaptures, normals, allCaptures };
 }
 
 function applyMove(board, move) {

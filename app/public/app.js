@@ -49,12 +49,17 @@ const resumeModal = $("resumeModal");
 const resumeInfo = $("resumeInfo");
 const btnResume = $("btnResume");
 const btnSkipResume = $("btnSkipResume");
-const movePanel = $("movePanel");
+const movesCard = document.querySelector(".movesCard");
+const movePanelMobileHint = $("movePanelMobileHint");
+const btnModifyMove = $("btnModifyMove");
 const movePanelSummary = $("movePanelSummary");
 const routeOptions = $("routeOptions");
 const capturePreview = $("capturePreview");
 const btnConfirmMove = $("btnConfirmMove");
 const btnCancelMove = $("btnCancelMove");
+const versionBadge = $("versionBadge");
+const tabButtons = document.querySelectorAll(".tabBtn");
+const tabPanels = document.querySelectorAll(".tabPanel");
 
 let me = null;
 let socket = null;
@@ -69,6 +74,14 @@ let boardCells = [];
 let lobbyRooms = [];
 let globalMessages = [];
 let resumeCode = null;
+let mobileMovesCollapsed = false;
+
+function switchTab(tabId) {
+  tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tabId));
+  tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+}
+
+tabButtons.forEach((btn) => btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
 
 async function api(path, method = "GET", body) {
   const res = await fetch(path, {
@@ -173,8 +186,11 @@ function initSocket() {
     currentRole = myColor ? "player" : "observer";
     roomCode.textContent = st.code;
     turnTxt.textContent = `Turno: ${st.turn}`;
-    forcedTxt.textContent = st.forced ? "Captura obligatoria activa" : "Sin capturas obligatorias";
-    pendingTxt.textContent = st.pendingDraw ? `Solicitud de tablas por ${st.pendingDraw.by}` : (st.pendingBlow ? "Puedes soplar ficha rival" : "");
+    forcedTxt.textContent = st.forced ? "Capturas recomendadas disponibles" : "Movimiento libre";
+    const blowSq = st.pendingBlow?.target ? squareName({ r: st.pendingBlow.target[0], c: st.pendingBlow.target[1] }) : "";
+    pendingTxt.textContent = st.pendingDraw
+      ? `Solicitud de tablas por ${st.pendingDraw.by}`
+      : (st.pendingBlow ? `Puedes soplar ficha rival${blowSq ? ` en ${blowSq}` : ""}` : (st.missedCapture ? `Captura omitida por ${st.missedCapture.by}` : ""));
     rolePill.textContent = currentRole === "player" ? `Jugando (${myColor || ""})` : "Observando";
     playerRed.textContent = `🔴 Rojo: ${st.players.red ? st.players.red.username : "—"}`;
     playerBlack.textContent = `⚫ Negro: ${st.players.black ? st.players.black.username : "—"}`;
@@ -228,9 +244,14 @@ function initSocket() {
     socket.emit("respondDraw", { code, accept });
   });
 
-  socket.on("blowOffered", ({ code }) => {
+  socket.on("blowOffered", ({ code, target }) => {
     if (code !== currentRoom) return;
-    const accept = window.confirm("El rival omitió una captura obligatoria. ¿Soplar ficha?");
+    let coordTxt = "";
+    if (target && Array.isArray(target)) {
+      const [r, c] = target;
+      coordTxt = ` (${squareName({ r, c })})`;
+    }
+    const accept = window.confirm(`El rival omitió una captura recomendada${coordTxt}. ¿Soplar ficha?`);
     if (accept) socket.emit("blowPiece", { code });
   });
 }
@@ -297,6 +318,12 @@ let currentPreviewBadges = [];
 function coordKey(c) { return `${c.r},${c.c}`; }
 function parseKey(key) { const [r, c] = key.split(",").map(Number); return { r, c }; }
 function squareName({ r, c }) { return `${files[c]}${8 - r}`; }
+function moveSig(mv) {
+  if (!mv) return "";
+  const pathSig = (mv.path || []).map((p) => `${p.r},${p.c}`).join("|");
+  const capsSig = (mv.captures || []).map((c) => `${c.coord.r},${c.coord.c},${c.pieceType},${c.color}`).join("|");
+  return `${pathSig}#${capsSig}`;
+}
 function pathMatchesPrefix(path, prefix) {
   if (prefix.length > path.length) return false;
   for (let i = 0; i < prefix.length; i++) {
@@ -372,10 +399,15 @@ function nextLandingOptions(sel) {
 
 function renderRouteCards(baseMoves) {
   routeOptions.innerHTML = "";
+  if (!state) {
+    routeOptions.innerHTML = "<div class=\"hint\">Crea o únete a una sala para ver rutas</div>";
+    return;
+  }
   if (!selection || !Array.isArray(baseMoves) || baseMoves.length === 0) {
     routeOptions.innerHTML = "<div class=\"hint\">Selecciona una ficha para ver rutas</div>";
     return;
   }
+  const recommendedMap = state.recommendedCaptureMap || {};
   baseMoves.forEach((mv, idx) => {
     const card = document.createElement("button");
     card.className = "routeCard";
@@ -385,9 +417,12 @@ function renderRouteCards(baseMoves) {
     const captures = mv.captures.length;
     const kings = mv.captures.filter((c) => c.pieceType === "king").length;
     const pathTxt = mv.path.map(squareName).join(" → ");
+    const captureLabel = captures ? `Capturas: ${captures}${kings ? ` • ${kings} dama(s)` : ""}` : "Movimiento simple";
+    const isRecommended = captures && recommendedMap[coordKey(mv.pieceFrom)]?.some((m) => moveSig(m) === moveSig(mv));
+    const badge = isRecommended ? `<span class="routeBadge capture">Recomendada</span>` : (captures ? `<span class="routeBadge optional">Omitible</span>` : "");
     card.innerHTML = `
-      <div class="routeTitle">Ruta ${idx + 1}: ${squareName(mv.pieceFrom)} → ${squareName(mv.pieceTo)}</div>
-      <div class="routeMeta">${captures ? `Capturas: ${captures}${kings ? ` • ${kings} dama(s)` : ""}` : "Movimiento simple"}</div>
+      <div class="routeTitle">Ruta ${idx + 1}: ${squareName(mv.pieceFrom)} → ${squareName(mv.pieceTo)} ${badge}</div>
+      <div class="routeMeta">${captureLabel}</div>
       <div class="routePath">${pathTxt}</div>
     `;
     card.onclick = () => selectRoute(mv);
@@ -396,23 +431,20 @@ function renderRouteCards(baseMoves) {
 }
 
 function renderMovePanel() {
-  if (!selection || !state || currentRole !== "player") {
-    movePanel.classList.add("hidden");
-    return;
-  }
-  movePanel.classList.remove("hidden");
-  const allMoves = state.moveMap?.[selection.fromKey] || [];
-  const candidateCount = selection.candidates?.length || 0;
-  const forcedTxt = state.forced ? "Captura obligatoria activa" : "Movimiento libre";
-  const currentPreviewMove = committedMove || selection.candidates?.[0];
+  const allMoves = selection ? (state.moveMap?.[selection.fromKey] || []) : [];
+  const candidateCount = selection?.candidates?.length || 0;
+  const recommendedCount = state?.recommendedCaptureMap ? Object.values(state.recommendedCaptureMap).flat().length : 0;
+  const recommended = recommendedCount ? `Capturas recomendadas (${recommendedCount})` : "Movimiento libre";
+  const currentPreviewMove = committedMove || selection?.candidates?.[0] || allMoves[0] || null;
   const captures = currentPreviewMove?.captures?.length || 0;
   const kings = currentPreviewMove?.captures?.filter((c) => c.pieceType === "king").length || 0;
-  const summaryPath = currentPreviewMove ? currentPreviewMove.path.map(squareName).join(" → ") : "";
-  movePanelSummary.textContent = `${forcedTxt} • ${candidateCount || allMoves.length} ruta(s) disponibles${captures ? ` • Capturas: ${captures}${kings ? ` (${kings} damas)` : ""}` : ""}`;
-  capturePreview.textContent = currentPreviewMove ? `Secuencia: ${summaryPath}` : "Sin selección";
+  const summaryPath = currentPreviewMove ? currentPreviewMove.path.map(squareName).join(" → ") : "Sin selección";
+  movePanelSummary.textContent = `${recommended} • ${selection ? (candidateCount || allMoves.length) : (state ? "elige una ficha" : "esperando sala")}${captures ? ` • Capturas: ${captures}${kings ? ` (${kings} damas)` : ""}` : ""}`;
+  capturePreview.textContent = currentPreviewMove ? `Secuencia: ${summaryPath}` : (state?.forced ? "Hay capturas recomendadas, pero puedes mover sin capturar (tu rival podrá soplar)." : "Selecciona una ficha para ver rutas");
 
   renderRouteCards(allMoves);
-  btnConfirmMove.disabled = !committedMove;
+  const canConfirm = !!(committedMove && currentRole === "player" && !state?.over && getMyColor() === state?.turn);
+  btnConfirmMove.disabled = !canConfirm;
 }
 
 function startSelection(fromKey) {
@@ -494,6 +526,7 @@ function renderBoard() {
   boardCells = [];
   if (!state) {
     if (!status.textContent) status.textContent = "Crea o únete a una sala para jugar";
+    renderMovePanel();
     return;
   }
 
@@ -518,6 +551,8 @@ function renderBoard() {
       }
 
       const key = `${r},${c}`;
+      const isBlowTarget = state.pendingBlow?.target && state.pendingBlow.target[0] === r && state.pendingBlow.target[1] === c;
+      if (isBlowTarget) cell.classList.add("blowTarget");
       const hasMovesFrom = Array.isArray(moveMap[key]) && moveMap[key].length > 0;
       const hasCaptureFrom = Array.isArray(captureMap[key]) && captureMap[key].length > 0;
 
@@ -686,6 +721,22 @@ btnCancelMove.onclick = () => {
   clearPreview();
   renderMovePanel();
 };
+btnModifyMove.onclick = () => {
+  if (!selection) return;
+  committedMove = null;
+  hoverMove = null;
+  refreshSelectionUI();
+};
+function toggleMobileMoves() {
+  if (!movesCard) return;
+  mobileMovesCollapsed = !mobileMovesCollapsed;
+  movesCard.classList.toggle("collapsed", mobileMovesCollapsed);
+}
+if (movePanelMobileHint) {
+  movePanelMobileHint.addEventListener("click", () => {
+    if (window.innerWidth <= 700) toggleMobileMoves();
+  });
+}
 
 btnRanking.onclick = async () => {
   await refreshLeaderboard();
@@ -725,8 +776,26 @@ function refreshLobby() {
   socket?.emit("listRooms");
 }
 
+async function loadVersion() {
+  if (!versionBadge) return;
+  try {
+    const data = await api("/api/version");
+    versionBadge.textContent = data.version || versionBadge.textContent;
+  } catch {
+    // fallback a la versión empacada
+  }
+}
+
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 700 && mobileMovesCollapsed) {
+    mobileMovesCollapsed = false;
+    movesCard?.classList.remove("collapsed");
+  }
+});
+
 (async function init() {
   await refreshMe();
+  await loadVersion();
   if (me) {
     await refreshLeaderboard();
     refreshLobby();
