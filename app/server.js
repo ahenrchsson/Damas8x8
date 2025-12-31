@@ -35,12 +35,12 @@ const {
   moveSignature
 } = require("./game");
 
-let VERSION = "v1.1.0";
+let VERSION = "v1.1.1";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.1.0";
+  VERSION = "v1.1.1";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
