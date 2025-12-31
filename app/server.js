@@ -165,45 +165,79 @@ async function main() {
 
   // ---------- Game Rooms (in-memory state) ----------
   const rooms = new Map(); // roomCode -> roomState
+  const userRoomMap = new Map(); // userId -> { code, color }
+  const globalMessages = [];
+  const lobbyRoomName = "lobby";
+  const MAX_ROOM_MSGS = 100;
+  const MAX_GLOBAL_MSGS = 200;
 
-  function makeRoomState({ code, mode, redUser, blackUser, ai = false }) {
+  function computeRoomState(room) {
+    const moves = computeMoves(room.board, room.turn);
+    room.forced = moves.forced;
+    room.moveMap = serializeMoveMap([...moves.captures, ...moves.normals]);
+    room.captureMap = serializeMoveMap(moves.captures);
+    room.availableCaptures = moves.captures;
+    room.availableNormals = moves.normals;
+  }
+
+  function makeRoomState({ code, name, mode, redUser, blackUser, ai = false }) {
     const board = initialBoard();
     const turn = "red"; // rojo parte
-    const moves = computeMoves(board, turn);
-    return {
+    const room = {
       code,
+      name: name || `Sala ${code}`,
       mode, // 'pvp' | 'ai'
       createdAt: Date.now(),
       board,
       turn,
-      forced: moves.forced,
-      moveMap: serializeMoveMap(moves.moves),
+      forced: false,
+      moveMap: {},
+      captureMap: {},
+      availableCaptures: [],
+      availableNormals: [],
       players: {
         red: redUser,   // { id, username, sid }
         black: blackUser // idem o null si no llegó / IA
       },
+      observers: new Map(), // socketId -> { username }
       ai,
       lastMove: null,
       over: false,
+      pendingDraw: null,
+      pendingBlow: null,
       messages: []
     };
+    computeRoomState(room);
+    return room;
+  }
+
+  function roomStatus(room) {
+    if (room.over) return "finished";
+    if (room.players.red && room.players.black) return "in_game";
+    return "waiting";
   }
 
   function publicStateFor(room) {
     return {
       code: room.code,
+      name: room.name,
       mode: room.mode,
       board: room.board,
       turn: room.turn,
       forced: room.forced,
       moveMap: room.moveMap,
+      captureMap: room.captureMap,
       players: {
-        red: room.players.red ? { username: room.players.red.username } : null,
-        black: room.players.black ? { username: room.players.black.username } : (room.ai ? { username: "AI" } : null)
+        red: room.players.red ? { id: room.players.red.id, username: room.players.red.username } : null,
+        black: room.players.black ? { id: room.players.black.id, username: room.players.black.username } : (room.ai ? { username: "AI" } : null)
       },
       lastMove: room.lastMove,
       over: room.over,
-      messages: room.messages.slice(-50).map(m => ({
+      pendingDraw: room.pendingDraw,
+      pendingBlow: room.pendingBlow,
+      observers: room.observers.size,
+      status: roomStatus(room),
+      messages: room.messages.slice(-MAX_ROOM_MSGS).map(m => ({
         id: m.id,
         user: m.username,
         text: m.text,
@@ -213,9 +247,7 @@ async function main() {
   }
 
   function recompute(room) {
-    const m = computeMoves(room.board, room.turn);
-    room.forced = m.forced;
-    room.moveMap = serializeMoveMap(m.moves);
+    computeRoomState(room);
     // sin movimientos = pierde el jugador del turno
     if (Object.keys(room.moveMap).length === 0) {
       room.over = true;
@@ -248,8 +280,8 @@ async function main() {
       ts: Date.now()
     };
     room.messages.push(msg);
-    if (room.messages.length > 50) {
-      room.messages = room.messages.slice(-50);
+    if (room.messages.length > MAX_ROOM_MSGS) {
+      room.messages = room.messages.slice(-MAX_ROOM_MSGS);
     }
     return msg;
   }
@@ -310,19 +342,37 @@ async function main() {
     );
   }
 
+  function lobbyList() {
+    return Array.from(rooms.values()).map((room) => ({
+      code: room.code,
+      name: room.name,
+      status: roomStatus(room),
+      players: [
+        room.players.red ? room.players.red.username : null,
+        room.players.black ? room.players.black.username : (room.ai ? "AI" : null)
+      ],
+      observers: room.observers.size,
+      over: room.over
+    }));
+  }
+
+  function emitLobby() {
+    io.to(lobbyRoomName).emit("lobbyRooms", lobbyList());
+  }
+
   function pickRandomMove(room) {
-    const keys = Object.keys(room.moveMap);
-    if (keys.length === 0) return null;
-    const k = keys[Math.floor(Math.random() * keys.length)];
-    const paths = room.moveMap[k];
-    const path = paths[Math.floor(Math.random() * paths.length)];
-    return { from: k.split(",").map(Number), path };
+    const pool = room.availableCaptures.length > 0 ? room.availableCaptures : room.availableNormals;
+    if (!pool || pool.length === 0) return null;
+    const mv = pool[Math.floor(Math.random() * pool.length)];
+    return { from: mv.from, path: mv.path };
   }
 
   async function maybePlayAI(room) {
     if (!room.ai || room.over) return;
     if (room.turn !== "black") return;
 
+    room.pendingBlow = null;
+    room.pendingDraw = null;
     const m = pickRandomMove(room);
     if (!m) return;
 
@@ -339,40 +389,84 @@ async function main() {
   }
 
   io.on("connection", (socket) => {
-    socket.on("createRoom", async ({ mode }) => {
-      const sid = socket.request?.headers?.cookie || "";
-      // validación real: el cliente envía me() antes. Aquí lo hacemos simple: exige auth via evento setUser.
-      socket.emit("needUser");
-    });
+    const sess = socket.request.session;
+    if (sess?.userId) {
+      socket.data.userId = sess.userId;
+      socket.data.username = sess.username;
+    }
+
+    const announceResume = () => {
+      if (socket.data.userId && userRoomMap.has(socket.data.userId)) {
+        const ref = userRoomMap.get(socket.data.userId);
+        const room = rooms.get(ref.code);
+        if (room && !room.over) {
+          socket.emit("resumePrompt", { code: room.code, name: room.name });
+        } else {
+          userRoomMap.delete(socket.data.userId);
+        }
+      }
+    };
+
+    socket.join(lobbyRoomName);
+    socket.emit("lobbyRooms", lobbyList());
+    socket.emit("globalChatHistory", globalMessages);
+    announceResume();
+
+    function ensureAuth() {
+      if (!socket.data.userId) {
+        socket.emit("err", { error: "no_auth" });
+        return false;
+      }
+      return true;
+    }
+
+    function ensurePlayer(room) {
+      const uid = socket.data.userId;
+      if (!uid) return null;
+      if (room.players.red?.id === uid) return "red";
+      if (room.players.black?.id === uid) return "black";
+      return null;
+    }
+
+    function sendState(room) {
+      io.to(room.code).emit("state", publicStateFor(room));
+    }
 
     socket.on("setUser", async ({ userId, username }) => {
       socket.data.userId = userId;
       socket.data.username = username;
       socket.emit("userOk");
+      socket.join(lobbyRoomName);
+      socket.emit("lobbyRooms", lobbyList());
+      announceResume();
     });
 
-    socket.on("newRoom", async ({ mode }) => {
-      if (!socket.data.userId) return socket.emit("err", { error: "no_auth" });
+    socket.on("listRooms", () => socket.emit("lobbyRooms", lobbyList()));
+
+    socket.on("newRoom", async ({ mode, name }) => {
+      if (!ensureAuth()) return;
 
       const code = nanoid(6).toUpperCase();
       const redUser = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
 
       let room;
       if (mode === "ai") {
-        room = makeRoomState({ code, mode: "ai", redUser, blackUser: null, ai: true });
+        room = makeRoomState({ code, name, mode: "ai", redUser, blackUser: null, ai: true });
       } else {
-        room = makeRoomState({ code, mode: "pvp", redUser, blackUser: null, ai: false });
+        room = makeRoomState({ code, name, mode: "pvp", redUser, blackUser: null, ai: false });
       }
 
       rooms.set(code, room);
       socket.join(code);
+      userRoomMap.set(redUser.id, { code, color: "red" });
+      emitLobby();
       socket.emit("roomCreated", { code });
-      io.to(code).emit("state", publicStateFor(room));
+      sendState(room);
       if (room.ai) maybePlayAI(room);
     });
 
     socket.on("joinRoom", async ({ code }) => {
-      if (!socket.data.userId) return socket.emit("err", { error: "no_auth" });
+      if (!ensureAuth()) return;
       const room = rooms.get(code);
       if (!room) return socket.emit("err", { error: "room_not_found" });
 
@@ -383,7 +477,50 @@ async function main() {
       room.players.black = { id: socket.data.userId, username: socket.data.username, sid: socket.id };
 
       socket.join(code);
-      io.to(code).emit("state", publicStateFor(room));
+      userRoomMap.set(socket.data.userId, { code, color: "black" });
+      emitLobby();
+      sendState(room);
+    });
+
+    socket.on("observeRoom", ({ code }) => {
+      const room = rooms.get(code);
+      if (!room) return socket.emit("err", { error: "room_not_found" });
+      room.observers.set(socket.id, { username: socket.data.username || "Observador" });
+      socket.join(code);
+      emitLobby();
+      sendState(room);
+    });
+
+    socket.on("leaveRoom", ({ code }) => {
+      const room = rooms.get(code);
+      if (!room) return;
+      socket.leave(code);
+      if (room.observers.has(socket.id)) {
+        room.observers.delete(socket.id);
+        emitLobby();
+      }
+      sendState(room);
+    });
+
+    socket.on("rejoinRoom", ({ code }) => {
+      if (!ensureAuth()) return;
+      const ref = userRoomMap.get(socket.data.userId);
+      if (!ref || ref.code !== code) return socket.emit("err", { error: "no_active_room" });
+      const room = rooms.get(code);
+      if (!room) {
+        userRoomMap.delete(socket.data.userId);
+        return socket.emit("err", { error: "room_not_found" });
+      }
+      const color = ref.color;
+      if (room.players[color]) room.players[color].sid = socket.id;
+      socket.join(code);
+      sendState(room);
+    });
+
+    socket.on("declineResume", ({ code }) => {
+      if (!ensureAuth()) return;
+      const ref = userRoomMap.get(socket.data.userId);
+      if (ref?.code === code) userRoomMap.delete(socket.data.userId);
     });
 
     socket.on("move", async ({ code, path }) => {
@@ -397,30 +534,77 @@ async function main() {
 
       if (!Array.isArray(path) || path.length < 2) return socket.emit("err", { error: "bad_move" });
 
-      const [sr, sc] = path[0];
-      const key = `${sr},${sc}`;
-      const legal = room.moveMap[key] || [];
-      const ok = legal.some(p => JSON.stringify(p) === JSON.stringify(path));
-      if (!ok) return socket.emit("err", { error: "illegal_move" });
+      if (room.pendingBlow && room.turn === ensurePlayer(room)) {
+        room.pendingBlow = null;
+      }
 
+      const moves = computeMoves(room.board, room.turn);
+      const allMoves = [...moves.captures, ...moves.normals];
+      const match = allMoves.find((m) => JSON.stringify(m.path) === JSON.stringify(path));
+      if (!match) return socket.emit("err", { error: "illegal_move" });
+
+      const isCapture = moves.captures.some((m) => JSON.stringify(m.path) === JSON.stringify(path));
+      const skippedCapture = moves.captures.length > 0 && !isCapture;
+
+      const [sr, sc] = path[0];
       room.board = applyMove(room.board, { from: [sr, sc], path });
       room.lastMove = { color: room.turn, path };
 
       const prevTurn = room.turn;
       room.turn = (room.turn === "red") ? "black" : "red";
+      room.pendingBlow = skippedCapture ? {
+        target: path[path.length - 1],
+        pieceColor: prevTurn,
+        offeredTo: room.turn,
+        ts: Date.now()
+      } : null;
+      room.pendingDraw = null; // limpiar solicitudes viejas al mover
 
       const chk = recompute(room);
-      io.to(code).emit("state", publicStateFor(room));
+      sendState(room);
+
+      if (room.pendingBlow && room.players[room.turn]?.sid) {
+        io.to(room.players[room.turn].sid).emit("blowOffered", { code: room.code, target: room.pendingBlow.target });
+      }
 
       if (chk.over) {
         const winnerColor = chk.winner === "red" || chk.winner === "black" ? chk.winner : null;
         io.to(code).emit("gameOver", chk);
         await finalizeRatedGame(room, winnerColor);
+        if (room.players.red) userRoomMap.delete(room.players.red.id);
+        if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
+        emitLobby();
       } else {
         // si es IA, juega
         if (room.ai) {
           await maybePlayAI(room);
         }
+      }
+    });
+
+    socket.on("blowPiece", async ({ code }) => {
+      const room = rooms.get(code);
+      if (!room || !room.pendingBlow) return;
+      const color = ensurePlayer(room);
+      if (!color) return socket.emit("err", { error: "not_player" });
+      if (color !== room.turn) return socket.emit("err", { error: "not_your_turn" });
+      if (room.pendingBlow.offeredTo && room.pendingBlow.offeredTo !== color) return socket.emit("err", { error: "not_allowed" });
+
+      const [r, c] = room.pendingBlow.target;
+      const piece = room.board[r]?.[c];
+      if (piece && colorOf(piece) === room.pendingBlow.pieceColor) {
+        room.board[r][c] = 0;
+      }
+      room.pendingBlow = null;
+      const chk = recompute(room);
+      sendState(room);
+      if (chk.over) {
+        const winnerColor = chk.winner === "red" || chk.winner === "black" ? chk.winner : null;
+        io.to(code).emit("gameOver", { ...chk, reason: chk.reason || "blown" });
+        await finalizeRatedGame(room, winnerColor);
+        if (room.players.red) userRoomMap.delete(room.players.red.id);
+        if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
+        emitLobby();
       }
     });
 
@@ -431,7 +615,8 @@ async function main() {
       const userId = socket.data.userId;
       const username = socket.data.username || "Jugador";
       if (!userId) return socket.emit("err", { error: "no_auth" });
-      if (!socket.rooms.has(code)) return socket.emit("err", { error: "not_in_room" });
+      const color = ensurePlayer(room);
+      if (!color || room.over) return socket.emit("err", { error: "not_allowed" });
 
       const msgText = (text || "").toString().trim().slice(0, 240);
       if (!msgText) return;
@@ -442,8 +627,83 @@ async function main() {
       }
     });
 
+    socket.on("globalMessage", ({ text }) => {
+      if (!ensureAuth()) return;
+      const msgText = (text || "").toString().trim().slice(0, 240);
+      if (!msgText) return;
+      const msg = {
+        id: nanoid(8),
+        userId: socket.data.userId,
+        username: socket.data.username || "Usuario",
+        text: msgText,
+        ts: Date.now()
+      };
+      globalMessages.push(msg);
+      if (globalMessages.length > MAX_GLOBAL_MSGS) {
+        globalMessages.splice(0, globalMessages.length - MAX_GLOBAL_MSGS);
+      }
+      io.to(lobbyRoomName).emit("globalChat", msg);
+    });
+
+    socket.on("requestDraw", ({ code }) => {
+      const room = rooms.get(code);
+      if (!room || room.over) return;
+      const color = ensurePlayer(room);
+      if (!color) return socket.emit("err", { error: "not_player" });
+      if (room.pendingDraw) return socket.emit("err", { error: "draw_pending" });
+
+      room.pendingDraw = { by: color, ts: Date.now() };
+      sendState(room);
+      const opp = color === "red" ? room.players.black : room.players.red;
+      if (opp?.sid) io.to(opp.sid).emit("drawOffer", { code });
+    });
+
+    socket.on("respondDraw", async ({ code, accept }) => {
+      const room = rooms.get(code);
+      if (!room || room.over) return;
+      const color = ensurePlayer(room);
+      if (!color) return socket.emit("err", { error: "not_player" });
+      if (!room.pendingDraw) return;
+      if (room.pendingDraw.by === color) return socket.emit("err", { error: "cannot_answer_own" });
+
+      if (accept) {
+        room.over = true;
+        sendState(room);
+        const result = { over: true, winner: null, reason: "draw" };
+        io.to(code).emit("gameOver", result);
+        await finalizeRatedGame(room, null);
+        if (room.players.red) userRoomMap.delete(room.players.red.id);
+        if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
+        emitLobby();
+      } else {
+        room.pendingDraw = null;
+        sendState(room);
+      }
+    });
+
+    socket.on("resign", async ({ code }) => {
+      const room = rooms.get(code);
+      if (!room || room.over) return;
+      const color = ensurePlayer(room);
+      if (!color) return socket.emit("err", { error: "not_player" });
+      const winner = color === "red" ? "black" : "red";
+      room.over = true;
+      sendState(room);
+      io.to(code).emit("gameOver", { over: true, winner, reason: "resign" });
+      await finalizeRatedGame(room, winner);
+      if (room.players.red) userRoomMap.delete(room.players.red.id);
+      if (room.players.black && !room.ai) userRoomMap.delete(room.players.black.id);
+      emitLobby();
+    });
+
     socket.on("disconnect", () => {
-      // No borramos sala inmediatamente; demo simple.
+      // Quitar de observadores
+      for (const room of rooms.values()) {
+        if (room.observers.has(socket.id)) {
+          room.observers.delete(socket.id);
+        }
+      }
+      emitLobby();
     });
   });
 

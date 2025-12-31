@@ -170,7 +170,6 @@ function computeMoves(board, turnColor) {
       captures.push(...computeCapturesFrom(board, r, c));
     }
   }
-  if (captures.length > 0) return { forced: true, moves: captures };
 
   // 2) movimientos normales
   const normals = [];
@@ -198,7 +197,11 @@ function computeMoves(board, turnColor) {
       }
     }
   }
-  return { forced: false, moves: normals };
+
+  const forced = captures.length > 0;
+  // compat: moves sigue devolviendo solo las opciones legales "preferidas"
+  const moves = forced ? captures : normals;
+  return { forced, moves, captures, normals };
 }
 
 function applyMove(board, move) {
