@@ -21,6 +21,7 @@ document.querySelector(".top-actions").appendChild(btnLogout);
 const btnNewPvP = $("btnNewPvP");
 const btnNewAI = $("btnNewAI");
 const btnJoin = $("btnJoin");
+const aiDifficulty = $("aiDifficulty");
 const joinCode = $("joinCode");
 const roomName = $("roomName");
 const roomCode = $("roomCode");
@@ -42,6 +43,8 @@ const playerRed = $("playerRed");
 const playerBlack = $("playerBlack");
 const btnRequestDraw = $("btnRequestDraw");
 const btnResign = $("btnResign");
+const btnLeaveRoom = $("btnLeaveRoom");
+const btnFinishRoom = $("btnFinishRoom");
 const resumeModal = $("resumeModal");
 const resumeInfo = $("resumeInfo");
 const btnResume = $("btnResume");
@@ -75,9 +78,12 @@ function setAuthUI(logged) {
   mainApp.classList.toggle("hidden", !logged);
   btnNewPvP.disabled = !canPlay;
   btnNewAI.disabled = !canPlay;
+  aiDifficulty.disabled = !canPlay;
   btnJoin.disabled = !canPlay;
   btnRequestDraw.disabled = !canPlay || !state || state.over || currentRole !== "player";
   btnResign.disabled = !canPlay || !state || state.over || currentRole !== "player";
+  btnLeaveRoom.disabled = !canPlay || !currentRoom || currentRole !== "player";
+  btnFinishRoom.disabled = !canPlay || !currentRoom || currentRole !== "player";
   globalChatInput.disabled = !logged || !socketReady;
   globalChatSend.disabled = !logged || !socketReady;
   updateChatControls();
@@ -163,7 +169,8 @@ function initSocket() {
     rolePill.textContent = currentRole === "player" ? `Jugando (${myColor || ""})` : "Observando";
     playerRed.textContent = `🔴 Rojo: ${st.players.red ? st.players.red.username : "—"}`;
     playerBlack.textContent = `⚫ Negro: ${st.players.black ? st.players.black.username : "—"}`;
-    status.textContent = st.over ? "Partida finalizada" : `${st.players.red?.username || "Rojo"} vs ${st.players.black?.username || "Negro"} • Turno ${st.turn}`;
+    const aiInfo = st.mode === "ai" && st.difficulty ? ` • IA ${st.difficulty}` : "";
+    status.textContent = st.over ? "Partida finalizada" : `${st.players.red?.username || "Rojo"} vs ${st.players.black?.username || "Negro"} • Turno ${st.turn}${aiInfo}`;
     selected = null;
     renderBoard();
     renderChat();
@@ -181,7 +188,19 @@ function initSocket() {
   });
 
   socket.on("err", (e) => {
-    status.textContent = `Error: ${e.error}`;
+    const msg = e?.message || e?.error || "Error";
+    status.textContent = `Error: ${msg}`;
+  });
+
+  socket.on("roomClosed", (payload) => {
+    const msg = payload?.message || "La sala ha sido cerrada.";
+    const reasonTxt = payload?.reason ? ` (${payload.reason})` : "";
+    status.textContent = `${msg}${reasonTxt}`;
+    clearRoomState();
+    renderBoard();
+    renderChat();
+    refreshLobby();
+    setAuthUI(!!me);
   });
 
   socket.on("chatMessage", (msg) => {
@@ -263,7 +282,7 @@ function renderGlobalChat() {
 function renderBoard() {
   boardEl.innerHTML = "";
   if (!state) {
-    status.textContent = "Crea o únete a una sala para jugar";
+    if (!status.textContent) status.textContent = "Crea o únete a una sala para jugar";
     return;
   }
 
@@ -385,6 +404,14 @@ function getMyColor() {
   return null;
 }
 
+function clearRoomState() {
+  state = null;
+  currentRoom = null;
+  currentRole = null;
+  selected = null;
+  boardEl.innerHTML = "";
+}
+
 btnLogin.onclick = async () => {
   try {
     const username = $("username").value.trim();
@@ -418,7 +445,7 @@ btnNewPvP.onclick = () => {
 };
 btnNewAI.onclick = () => {
   if (!socketReady) return;
-  socket?.emit("newRoom", { mode: "ai", name: roomName.value.trim() });
+  socket?.emit("newRoom", { mode: "ai", name: roomName.value.trim(), difficulty: aiDifficulty.value });
 };
 
 btnJoin.onclick = () => {
@@ -453,6 +480,18 @@ btnResign.onclick = () => {
   if (!state || !currentRoom) return;
   const ok = window.confirm("¿Seguro que deseas rendirte?");
   if (ok) socket.emit("resign", { code: currentRoom });
+};
+
+btnLeaveRoom.onclick = () => {
+  if (!state || !currentRoom) return;
+  const reason = state.mode === "ai" ? "ai_exit" : "leave";
+  socket.emit("room:close", { code: currentRoom, reason });
+};
+
+btnFinishRoom.onclick = () => {
+  if (!state || !currentRoom) return;
+  const reason = "finished";
+  socket.emit("room:close", { code: currentRoom, reason });
 };
 
 btnRanking.onclick = async () => {

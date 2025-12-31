@@ -23,6 +23,13 @@ async function migrate(pool) {
       last_played TIMESTAMPTZ
     );
 
+    CREATE TABLE IF NOT EXISTS active_rooms (
+      user_id   INTEGER PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+      room_code TEXT NOT NULL,
+      mode      TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS games (
       id           BIGSERIAL PRIMARY KEY,
       played_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -68,5 +75,19 @@ module.exports = {
   migrate,
   ensureUserRating,
   getRating,
-  upsertRating
+  upsertRating,
+  async setActiveRoom(pool, userId, roomCode, mode) {
+    await pool.query(`
+      INSERT INTO active_rooms (user_id, room_code, mode)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id) DO UPDATE SET room_code=EXCLUDED.room_code, mode=EXCLUDED.mode, created_at=NOW()
+    `, [userId, roomCode, mode]);
+  },
+  async clearActiveRoom(pool, userId) {
+    await pool.query(`DELETE FROM active_rooms WHERE user_id=$1`, [userId]);
+  },
+  async getActiveRoom(pool, userId) {
+    const { rows } = await pool.query(`SELECT * FROM active_rooms WHERE user_id=$1`, [userId]);
+    return rows[0] || null;
+  }
 };

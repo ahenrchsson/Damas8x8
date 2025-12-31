@@ -39,6 +39,11 @@
           <div class="row">
             <input id="roomName" placeholder="Nombre opcional de sala"/>
             <button id="btnNewPvP" disabled>Crear sala PvP</button>
+            <select id="aiDifficulty">
+              <option value="easy">Fácil</option>
+              <option value="medium">Media</option>
+              <option value="hard">Difícil</option>
+            </select>
             <button id="btnNewAI" class="ghost" disabled>Vs IA</button>
           </div>
           <div class="row">
@@ -88,6 +93,8 @@
           <div class="row stack">
             <button id="btnRequestDraw" disabled>Solicitar tablas</button>
             <button id="btnResign" class="danger" disabled>Rendirse</button>
+            <button id="btnLeaveRoom" class="ghost" disabled>Salir de la sala</button>
+            <button id="btnFinishRoom" class="ghost" disabled>Finalizar partida</button>
           </div>
         </div>
 
