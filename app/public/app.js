@@ -49,6 +49,12 @@ const resumeModal = $("resumeModal");
 const resumeInfo = $("resumeInfo");
 const btnResume = $("btnResume");
 const btnSkipResume = $("btnSkipResume");
+const movePanel = $("movePanel");
+const movePanelSummary = $("movePanelSummary");
+const routeOptions = $("routeOptions");
+const capturePreview = $("capturePreview");
+const btnConfirmMove = $("btnConfirmMove");
+const btnCancelMove = $("btnCancelMove");
 
 let me = null;
 let socket = null;
@@ -56,7 +62,10 @@ let socketReady = false;
 let currentRoom = null;
 let currentRole = null;
 let state = null;
-let selected = null;
+let selection = null;
+let committedMove = null;
+let hoverMove = null;
+let boardCells = [];
 let lobbyRooms = [];
 let globalMessages = [];
 let resumeCode = null;
@@ -171,7 +180,9 @@ function initSocket() {
     playerBlack.textContent = `⚫ Negro: ${st.players.black ? st.players.black.username : "—"}`;
     const aiInfo = st.mode === "ai" && st.difficulty ? ` • IA ${st.difficulty}` : "";
     status.textContent = st.over ? "Partida finalizada" : `${st.players.red?.username || "Rojo"} vs ${st.players.black?.username || "Negro"} • Turno ${st.turn}${aiInfo}`;
-    selected = null;
+    selection = null;
+    committedMove = null;
+    hoverMove = null;
     renderBoard();
     renderChat();
     updateChatControls();
@@ -279,8 +290,208 @@ function renderGlobalChat() {
   globalChatLog.scrollTop = globalChatLog.scrollHeight;
 }
 
+const files = "abcdefgh";
+let currentTargets = [];
+let currentPreviewBadges = [];
+
+function coordKey(c) { return `${c.r},${c.c}`; }
+function parseKey(key) { const [r, c] = key.split(",").map(Number); return { r, c }; }
+function squareName({ r, c }) { return `${files[c]}${8 - r}`; }
+function pathMatchesPrefix(path, prefix) {
+  if (prefix.length > path.length) return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (path[i].r !== prefix[i].r || path[i].c !== prefix[i].c) return false;
+  }
+  return true;
+}
+
+function getCell({ r, c }) {
+  return boardCells[r * 8 + c];
+}
+
+function clearTargetHighlights() {
+  currentTargets.forEach((cell) => {
+    cell.classList.remove("target", "forced");
+    cell.onclick = null;
+    cell.onmouseenter = null;
+    cell.onmouseleave = null;
+  });
+  currentTargets = [];
+}
+
+function clearPreview() {
+  boardEl.querySelectorAll(".preview, .preview-step, .selected").forEach((el) => {
+    el.classList.remove("preview", "preview-step", "selected");
+    el.dataset.step = "";
+  });
+  currentPreviewBadges.forEach((b) => b.remove());
+  currentPreviewBadges = [];
+}
+
+function showPreview(move, opts = {}) {
+  if (!move) return;
+  clearPreview();
+  const partialUntil = opts.partialUntil || move.path.length;
+  move.path.forEach((p, idx) => {
+    const cell = getCell(p);
+    if (!cell) return;
+    if (idx === 0) {
+      cell.classList.add("selected");
+    } else if (idx < partialUntil) {
+      cell.classList.add("preview-step");
+      cell.dataset.step = idx;
+    } else if (idx === partialUntil) {
+      cell.classList.add("target");
+    }
+  });
+
+  move.captures.forEach((cap, idx) => {
+    const cell = getCell(cap.coord);
+    if (!cell) return;
+    const badge = document.createElement("div");
+    badge.className = "captureBadge";
+    badge.textContent = idx + 1;
+    cell.appendChild(badge);
+    currentPreviewBadges.push(badge);
+  });
+}
+
+function nextLandingOptions(sel) {
+  if (!sel) return [];
+  const index = sel.prefix.length;
+  const seen = new Map();
+  for (const mv of sel.candidates) {
+    if (!pathMatchesPrefix(mv.path, sel.prefix)) continue;
+    if (mv.path.length <= index) continue;
+    const nxt = mv.path[index];
+    const key = coordKey(nxt);
+    if (!seen.has(key)) seen.set(key, nxt);
+  }
+  return Array.from(seen.values());
+}
+
+function renderRouteCards(baseMoves) {
+  routeOptions.innerHTML = "";
+  if (!selection || !Array.isArray(baseMoves) || baseMoves.length === 0) {
+    routeOptions.innerHTML = "<div class=\"hint\">Selecciona una ficha para ver rutas</div>";
+    return;
+  }
+  baseMoves.forEach((mv, idx) => {
+    const card = document.createElement("button");
+    card.className = "routeCard";
+    if (committedMove && coordKey(committedMove.pieceTo) === coordKey(mv.pieceTo) && pathMatchesPrefix(committedMove.path, mv.path) && pathMatchesPrefix(mv.path, committedMove.path)) {
+      card.classList.add("active");
+    }
+    const captures = mv.captures.length;
+    const kings = mv.captures.filter((c) => c.pieceType === "king").length;
+    const pathTxt = mv.path.map(squareName).join(" → ");
+    card.innerHTML = `
+      <div class="routeTitle">Ruta ${idx + 1}: ${squareName(mv.pieceFrom)} → ${squareName(mv.pieceTo)}</div>
+      <div class="routeMeta">${captures ? `Capturas: ${captures}${kings ? ` • ${kings} dama(s)` : ""}` : "Movimiento simple"}</div>
+      <div class="routePath">${pathTxt}</div>
+    `;
+    card.onclick = () => selectRoute(mv);
+    routeOptions.appendChild(card);
+  });
+}
+
+function renderMovePanel() {
+  if (!selection || !state || currentRole !== "player") {
+    movePanel.classList.add("hidden");
+    return;
+  }
+  movePanel.classList.remove("hidden");
+  const allMoves = state.moveMap?.[selection.fromKey] || [];
+  const candidateCount = selection.candidates?.length || 0;
+  const forcedTxt = state.forced ? "Captura obligatoria activa" : "Movimiento libre";
+  const currentPreviewMove = committedMove || selection.candidates?.[0];
+  const captures = currentPreviewMove?.captures?.length || 0;
+  const kings = currentPreviewMove?.captures?.filter((c) => c.pieceType === "king").length || 0;
+  const summaryPath = currentPreviewMove ? currentPreviewMove.path.map(squareName).join(" → ") : "";
+  movePanelSummary.textContent = `${forcedTxt} • ${candidateCount || allMoves.length} ruta(s) disponibles${captures ? ` • Capturas: ${captures}${kings ? ` (${kings} damas)` : ""}` : ""}`;
+  capturePreview.textContent = currentPreviewMove ? `Secuencia: ${summaryPath}` : "Sin selección";
+
+  renderRouteCards(allMoves);
+  btnConfirmMove.disabled = !committedMove;
+}
+
+function startSelection(fromKey) {
+  const moves = state.moveMap?.[fromKey] || [];
+  const autoMove = moves.length === 1 ? moves[0] : null;
+  const prefix = autoMove ? [...autoMove.path] : [parseKey(fromKey)];
+  const candidates = autoMove ? [autoMove] : moves;
+  selection = { fromKey, candidates, prefix, allMoves: moves };
+  committedMove = autoMove;
+  hoverMove = null;
+  clearTargetHighlights();
+  showPreview(committedMove || moves[0]);
+  refreshSelectionUI();
+}
+
+function advanceSelection(coord) {
+  if (!selection) return;
+  const newPrefix = selection.prefix.concat([coord]);
+  const filtered = selection.candidates.filter((mv) => pathMatchesPrefix(mv.path, newPrefix));
+  selection.prefix = newPrefix;
+  selection.candidates = filtered;
+  committedMove = (filtered.length === 1 && filtered[0].path.length === newPrefix.length) ? filtered[0] : null;
+  hoverMove = null;
+  refreshSelectionUI();
+}
+
+function refreshSelectionUI() {
+  clearTargetHighlights();
+  clearPreview();
+  if (!selection) {
+    renderMovePanel();
+    return;
+  }
+  const fromCell = getCell(parseKey(selection.fromKey));
+  if (fromCell) fromCell.classList.add("selected");
+
+  const options = nextLandingOptions(selection);
+  const previewMove = committedMove || selection.candidates[0];
+  if (previewMove) showPreview(previewMove, { partialUntil: selection.prefix.length });
+
+  options.forEach((opt) => {
+    const cell = getCell(opt);
+    if (!cell) return;
+    cell.classList.add("target");
+    cell.onclick = () => advanceSelection(opt);
+    cell.onmouseenter = () => showPreview(selection.candidates.find((mv) => mv.path[selection.prefix.length]?.r === opt.r && mv.path[selection.prefix.length]?.c === opt.c) || previewMove, { partialUntil: selection.prefix.length + 1 });
+    cell.onmouseleave = () => showPreview(previewMove, { partialUntil: selection.prefix.length });
+    currentTargets.push(cell);
+  });
+
+  renderMovePanel();
+}
+
+function selectRoute(move) {
+  if (!move) return;
+  const fromKey = coordKey(move.pieceFrom);
+  selection = { fromKey, candidates: [move], prefix: [...move.path], allMoves: state.moveMap?.[fromKey] || [move] };
+  committedMove = move;
+  hoverMove = null;
+  refreshSelectionUI();
+}
+
+function submitMove(move) {
+  if (!socket || !currentRoom || !socketReady) return;
+  if (!move) return;
+  socket.emit("move", { code: currentRoom, move });
+  selection = null;
+  committedMove = null;
+  hoverMove = null;
+  clearTargetHighlights();
+  clearPreview();
+  renderMovePanel();
+}
+
 function renderBoard() {
   boardEl.innerHTML = "";
+  currentTargets = [];
+  currentPreviewBadges = [];
+  boardCells = [];
   if (!state) {
     if (!status.textContent) status.textContent = "Crea o únete a una sala para jugar";
     return;
@@ -307,21 +518,20 @@ function renderBoard() {
       }
 
       const key = `${r},${c}`;
-      const hasMovesFrom = !!moveMap[key];
-      const hasCaptureFrom = !!captureMap[key];
+      const hasMovesFrom = Array.isArray(moveMap[key]) && moveMap[key].length > 0;
+      const hasCaptureFrom = Array.isArray(captureMap[key]) && captureMap[key].length > 0;
 
       if ((r + c) % 2 === 1 && myTurn && hasMovesFrom && currentRole === "player") {
         cell.classList.add("clickable");
         if (hasCaptureFrom) cell.classList.add("forced");
-        cell.addEventListener("click", () => {
-          selected = { fromKey: key, paths: moveMap[key] };
-          highlightTargets(selected.paths);
-        });
+        cell.addEventListener("click", () => startSelection(key));
       }
 
       boardEl.appendChild(cell);
+      boardCells.push(cell);
     }
   }
+  refreshSelectionUI();
 }
 
 function renderChat() {
@@ -352,35 +562,6 @@ function renderChat() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-function clearTargetHighlights() {
-  [...boardEl.querySelectorAll(".cell")].forEach(x => {
-    x.classList.remove("target");
-    x.onclick = null;
-  });
-}
-
-function highlightTargets(paths) {
-  clearTargetHighlights();
-  const targets = new Map(); // "r,c" -> path
-  for (const p of paths) {
-    const last = p[p.length - 1];
-    targets.set(`${last[0]},${last[1]}`, p);
-  }
-  for (const [k, path] of targets.entries()) {
-    const [r, c] = k.split(",").map(Number);
-    const idx = r * 8 + c;
-    const cell = boardEl.children[idx];
-    cell.classList.add("target");
-    cell.onclick = () => submitMove(path);
-  }
-}
-
-function submitMove(path) {
-  if (!socket || !currentRoom || !socketReady) return;
-  socket.emit("move", { code: currentRoom, path });
-  clearTargetHighlights();
-}
-
 function sendChatMessage() {
   if (!socket || !currentRoom || !socketReady) return;
   const text = chatInput.value.trim();
@@ -408,7 +589,10 @@ function clearRoomState() {
   state = null;
   currentRoom = null;
   currentRole = null;
-  selected = null;
+  selection = null;
+  committedMove = null;
+  hoverMove = null;
+  boardCells = [];
   boardEl.innerHTML = "";
 }
 
@@ -492,6 +676,15 @@ btnFinishRoom.onclick = () => {
   if (!state || !currentRoom) return;
   const reason = "finished";
   socket.emit("room:close", { code: currentRoom, reason });
+};
+btnConfirmMove.onclick = () => submitMove(committedMove);
+btnCancelMove.onclick = () => {
+  selection = null;
+  committedMove = null;
+  hoverMove = null;
+  clearTargetHighlights();
+  clearPreview();
+  renderMovePanel();
 };
 
 btnRanking.onclick = async () => {

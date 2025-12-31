@@ -66,10 +66,26 @@ button.danger { background: #e04f5f; }
 .red { background:#d64a4a; }
 .black { background:#4a4f5b; }
 .king::after { content:"♕"; position:absolute; font-size: 22px; opacity:.95; inset: 0; display:flex; align-items:center; justify-content:center; }
+.cell.selected { box-shadow: inset 0 0 0 3px rgba(255,255,255,.3); }
+.cell.preview-step { box-shadow: inset 0 0 0 3px rgba(43,108,255,.45); }
+.cell.preview-step::after { content: attr(data-step); position:absolute; top:6px; left:6px; background:rgba(43,108,255,.8); color:white; width:18px; height:18px; border-radius: 999px; font-size: 12px; display:flex; align-items:center; justify-content:center; }
+.captureBadge { position:absolute; bottom:6px; right:6px; background: #00c896; color:#0f1115; width:20px; height:20px; border-radius: 999px; display:flex; align-items:center; justify-content:center; font-size: 12px; font-weight: 800; box-shadow: 0 2px 6px rgba(0,0,0,.45); }
 
 .infoLine { margin: 6px 0; opacity: .9; }
 .players { display:flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .player { padding: 8px 10px; border:1px solid #232a36; border-radius: 10px; background:#0f1115; }
+
+.movePanel { margin-top: 10px; border:1px solid #232a36; border-radius: 12px; padding: 10px; background:#10141d; }
+.movePanelHeader { display:flex; justify-content: space-between; gap: 8px; align-items:center; flex-wrap: wrap; }
+.movePanelTitle { font-weight: 800; }
+.movePanelActions { display:flex; gap: 8px; }
+.routeOptions { display:flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.routeCard { text-align:left; width:100%; background:#1a1f2c; border:1px solid #232a36; border-radius: 12px; padding: 10px; cursor:pointer; color: #e7e7e7; }
+.routeCard .routePath { color:#b6c4ff; font-size: 12px; word-break: break-word; margin-top: 4px; }
+.routeCard .routeMeta { opacity: .8; font-size: 12px; }
+.routeCard .routeTitle { font-weight: 800; margin-bottom: 2px; }
+.routeCard.active { border-color:#2b6cff; box-shadow: 0 0 0 1px rgba(43,108,255,.4); }
+.capturePreview { margin: 6px 0; }
 
 .drawer { position: fixed; inset:0; background: rgba(0,0,0,.55); display:flex; justify-content:flex-end; z-index: 10; }
 .drawerContent { width: 420px; max-width: 92vw; background:#151a22; border-left: 1px solid #232a36; padding: 14px; }
