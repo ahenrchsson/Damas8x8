@@ -58,7 +58,13 @@ const capturePreview = $("capturePreview");
 const btnConfirmMove = $("btnConfirmMove");
 const btnCancelMove = $("btnCancelMove");
 const versionBadge = $("versionBadge");
-const tabButtons = document.querySelectorAll(".tabBtn");
+const versionFloating = $("versionFloating");
+const matchMeta = $("matchMeta");
+const focusPill = $("focusPill");
+const lowerPanel = $("lowerPanel");
+const lowerContent = $("lowerContent");
+const toggleLowerPanel = $("toggleLowerPanel");
+const tabButtons = document.querySelectorAll(".lowerTabBtn");
 const tabPanels = document.querySelectorAll(".tabPanel");
 
 let me = null;
@@ -75,13 +81,29 @@ let lobbyRooms = [];
 let globalMessages = [];
 let resumeCode = null;
 let mobileMovesCollapsed = false;
+let panelCollapsed = false;
+let activeTab = "lobbyPanel";
 
 function switchTab(tabId) {
+  activeTab = tabId;
   tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tabId));
   tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+  if (lowerPanel && panelCollapsed) {
+    setPanelCollapsed(false);
+  }
+}
+
+function setPanelCollapsed(collapsed) {
+  panelCollapsed = collapsed;
+  if (lowerPanel) lowerPanel.classList.toggle("collapsed", collapsed);
+  if (toggleLowerPanel) toggleLowerPanel.textContent = collapsed ? "Expandir panel" : "Colapsar panel";
 }
 
 tabButtons.forEach((btn) => btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
+if (toggleLowerPanel) toggleLowerPanel.onclick = () => setPanelCollapsed(!panelCollapsed);
+switchTab(activeTab);
+setPanelCollapsed(window.innerWidth < 760);
+updateFocusMode(false);
 
 async function api(path, method = "GET", body) {
   const res = await fetch(path, {
@@ -109,6 +131,19 @@ function setAuthUI(logged) {
   globalChatInput.disabled = !logged || !socketReady;
   globalChatSend.disabled = !logged || !socketReady;
   updateChatControls();
+}
+
+function updateFocusMode(inRoom) {
+  document.body.classList.toggle("inRoom", inRoom);
+  if (focusPill) {
+    focusPill.textContent = inRoom ? "Game Focus activo" : "Modo lobby";
+    focusPill.classList.toggle("success", inRoom);
+    focusPill.classList.toggle("ghost", !inRoom);
+  }
+  if (!inRoom) {
+    switchTab("lobbyPanel");
+    if (window.innerWidth < 760) setPanelCollapsed(true);
+  }
 }
 
 function updateChatControls() {
@@ -180,13 +215,19 @@ function initSocket() {
   });
 
   socket.on("state", (st) => {
+    const prevRoom = currentRoom;
+    const wasInRoom = !!state;
     state = { ...st, messages: st.messages || [] };
     currentRoom = st.code;
     const myColor = getMyColor();
     currentRole = myColor ? "player" : "observer";
+    updateFocusMode(true);
+    if (!wasInRoom || prevRoom !== st.code || activeTab === "lobbyPanel") {
+      switchTab("matchPanel");
+    }
     roomCode.textContent = st.code;
     turnTxt.textContent = `Turno: ${st.turn}`;
-    forcedTxt.textContent = st.forced ? "Capturas recomendadas disponibles" : "Movimiento libre";
+    forcedTxt.textContent = st.forced ? "Capturas recomendadas visibles (opcionales)" : "Movimiento libre";
     const blowSq = st.pendingBlow?.target ? squareName({ r: st.pendingBlow.target[0], c: st.pendingBlow.target[1] }) : "";
     pendingTxt.textContent = st.pendingDraw
       ? `Solicitud de tablas por ${st.pendingDraw.by}`
@@ -196,6 +237,12 @@ function initSocket() {
     playerBlack.textContent = `⚫ Negro: ${st.players.black ? st.players.black.username : "—"}`;
     const aiInfo = st.mode === "ai" && st.difficulty ? ` • IA ${st.difficulty}` : "";
     status.textContent = st.over ? "Partida finalizada" : `${st.players.red?.username || "Rojo"} vs ${st.players.black?.username || "Negro"} • Turno ${st.turn}${aiInfo}`;
+    if (matchMeta) {
+      const modeTxt = st.mode === "ai" ? `Modo IA${st.difficulty ? ` ${st.difficulty}` : ""}` : "PvP";
+      const spectators = st.observers || 0;
+      matchMeta.textContent = `${modeTxt} • Observadores: ${spectators} • Turno #${st.turnCount || 1}`;
+    }
+    setPanelCollapsed(false);
     selection = null;
     committedMove = null;
     hoverMove = null;
@@ -207,6 +254,7 @@ function initSocket() {
 
   socket.on("gameOver", (g) => {
     status.textContent = `🏁 Fin: ${g.reason || "fin"}. Ganador: ${g.winner || "empate"}`;
+    if (matchMeta) matchMeta.textContent = "La partida ha concluido. Usa Salas para iniciar otra.";
     if (currentRole === "player") {
       chatInput.disabled = true;
       chatSend.disabled = true;
@@ -223,6 +271,7 @@ function initSocket() {
     const msg = payload?.message || "La sala ha sido cerrada.";
     const reasonTxt = payload?.reason ? ` (${payload.reason})` : "";
     status.textContent = `${msg}${reasonTxt}`;
+    updateFocusMode(false);
     clearRoomState();
     renderBoard();
     renderChat();
@@ -434,7 +483,7 @@ function renderMovePanel() {
   const allMoves = selection ? (state.moveMap?.[selection.fromKey] || []) : [];
   const candidateCount = selection?.candidates?.length || 0;
   const recommendedCount = state?.recommendedCaptureMap ? Object.values(state.recommendedCaptureMap).flat().length : 0;
-  const recommended = recommendedCount ? `Capturas recomendadas (${recommendedCount})` : "Movimiento libre";
+  const recommended = recommendedCount ? `Capturas recomendadas opcionales (${recommendedCount})` : "Movimiento libre";
   const currentPreviewMove = committedMove || selection?.candidates?.[0] || allMoves[0] || null;
   const captures = currentPreviewMove?.captures?.length || 0;
   const kings = currentPreviewMove?.captures?.filter((c) => c.pieceType === "king").length || 0;
@@ -525,7 +574,7 @@ function renderBoard() {
   currentPreviewBadges = [];
   boardCells = [];
   if (!state) {
-    if (!status.textContent) status.textContent = "Crea o únete a una sala para jugar";
+    status.textContent = "Crea o únete a una sala desde el panel inferior";
     renderMovePanel();
     return;
   }
@@ -629,6 +678,16 @@ function clearRoomState() {
   hoverMove = null;
   boardCells = [];
   boardEl.innerHTML = "";
+  roomCode.textContent = "—";
+  turnTxt.textContent = "Turno: —";
+  forcedTxt.textContent = "Capturas recomendadas: —";
+  pendingTxt.textContent = "";
+  playerRed.textContent = "🔴 Rojo: —";
+  playerBlack.textContent = "⚫ Negro: —";
+  rolePill.textContent = "Observando";
+  status.textContent = "Usa la pestaña Salas para crear o unirte a una partida.";
+  if (matchMeta) matchMeta.textContent = "El tablero permanece visible incluso en espera.";
+  updateFocusMode(false);
 }
 
 btnLogin.onclick = async () => {
@@ -777,10 +836,12 @@ function refreshLobby() {
 }
 
 async function loadVersion() {
-  if (!versionBadge) return;
+  if (!versionBadge && !versionFloating) return;
   try {
     const data = await api("/api/version");
-    versionBadge.textContent = data.version || versionBadge.textContent;
+    const txt = data.version || versionBadge?.textContent || versionFloating?.textContent;
+    if (versionBadge) versionBadge.textContent = txt;
+    if (versionFloating) versionFloating.textContent = txt;
   } catch {
     // fallback a la versión empacada
   }
@@ -790,6 +851,12 @@ window.addEventListener("resize", () => {
   if (window.innerWidth > 700 && mobileMovesCollapsed) {
     mobileMovesCollapsed = false;
     movesCard?.classList.remove("collapsed");
+  }
+  if (window.innerWidth < 760 && !state) {
+    setPanelCollapsed(true);
+  }
+  if (window.innerWidth > 840 && state && panelCollapsed) {
+    setPanelCollapsed(false);
   }
 });
 

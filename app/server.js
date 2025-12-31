@@ -35,12 +35,12 @@ const {
   moveSignature
 } = require("./game");
 
-let VERSION = "v1.0.1";
+let VERSION = "v1.1.0";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.0.1";
+  VERSION = "v1.1.0";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -320,6 +320,7 @@ async function main() {
       aiColor: room.aiColor,
       observers: room.observers.size,
       status: roomStatus(room),
+      turnCount: room.turnCount,
       messages: room.messages.slice(-MAX_ROOM_MSGS).map(m => ({
         id: m.id,
         user: m.username,
@@ -923,7 +924,8 @@ async function main() {
   });
 
   const port = process.env.PORT || 3000;
-  server.listen(port, () => console.log(`Damas web listo en :${port}`));
+  console.log(`Starting Damas8x8 ${VERSION}`);
+  server.listen(port, () => console.log(`Damas web ${VERSION} listo en :${port}`));
 }
 
 main().catch((e) => {
