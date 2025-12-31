@@ -1,6 +1,6 @@
 {
   "name": "damas-web-ranking",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "main": "server.js",
   "type": "commonjs",

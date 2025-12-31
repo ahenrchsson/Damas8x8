@@ -30,6 +30,12 @@ async function migrate(pool) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      user_id INTEGER PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+      last_color_ai TEXT CHECK (last_color_ai IN ('red','black')),
+      last_color_pvp TEXT CHECK (last_color_pvp IN ('red','black'))
+    );
+
     CREATE TABLE IF NOT EXISTS games (
       id           BIGSERIAL PRIMARY KEY,
       played_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -89,5 +95,20 @@ module.exports = {
   async getActiveRoom(pool, userId) {
     const { rows } = await pool.query(`SELECT * FROM active_rooms WHERE user_id=$1`, [userId]);
     return rows[0] || null;
+  },
+  async getUserPrefs(pool, userId) {
+    const { rows } = await pool.query(`SELECT * FROM user_prefs WHERE user_id=$1`, [userId]);
+    return rows[0] || null;
+  },
+  async setUserPrefs(pool, userId, fields) {
+    const keys = Object.keys(fields);
+    if (keys.length === 0) return;
+    const cols = keys.map((k) => `${k} = EXCLUDED.${k}`).join(", ");
+    const values = keys.map((k) => fields[k]);
+    await pool.query(`
+      INSERT INTO user_prefs (user_id, ${keys.join(", ")})
+      VALUES ($1, ${keys.map((_, i) => `$${i + 2}`).join(", ")})
+      ON CONFLICT (user_id) DO UPDATE SET ${cols}
+    `, [userId, ...values]);
   }
 };
