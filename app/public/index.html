@@ -3,13 +3,16 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Damas - Web + Ranking</title>
+  <title>Damas - Lobby PvP</title>
   <link rel="stylesheet" href="/style.css"/>
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">♟️ Damas</div>
-    <div id="meBox" class="me"></div>
+    <div class="brand">♟️ Damas Multijugador</div>
+    <div class="top-actions">
+      <button id="btnRanking" class="ghost">Ranking Global</button>
+      <div id="meBox" class="me"></div>
+    </div>
   </div>
 
   <div class="wrap">
@@ -22,59 +25,124 @@
       <div class="row">
         <button id="btnLogin">Login</button>
         <button id="btnRegister">Registro</button>
-        <button id="btnLogout" class="ghost" style="display:none;">Logout</button>
       </div>
       <div class="hint" id="authMsg"></div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h2>Juego</h2>
-        <div class="row">
-          <button id="btnNewPvP" disabled>Crear sala PvP</button>
-          <button id="btnNewAI" disabled>Jugar vs IA</button>
+    <div id="mainApp" class="hidden">
+      <div class="grid lobby-grid">
+        <div class="card">
+          <div class="cardHeader">
+            <h2>Lobby de salas PvP</h2>
+            <span id="lobbyStatus" class="pill">Tiempo real</span>
+          </div>
+          <div class="row">
+            <input id="roomName" placeholder="Nombre opcional de sala"/>
+            <button id="btnNewPvP" disabled>Crear sala PvP</button>
+            <button id="btnNewAI" class="ghost" disabled>Vs IA</button>
+          </div>
+          <div class="row">
+            <input id="joinCode" placeholder="Código sala (ej: ABC123)" />
+            <button id="btnJoin" disabled>Unirse</button>
+          </div>
+          <div class="tableWrap">
+            <table class="tbl" id="roomsTable">
+              <thead>
+                <tr>
+                  <th>Sala</th>
+                  <th>Estado</th>
+                  <th>Jugadores</th>
+                  <th>Obs</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
-        <div class="row">
-          <input id="joinCode" placeholder="Código sala (ej: ABC123)" />
-          <button id="btnJoin" disabled>Unirse</button>
-        </div>
 
-        <div class="roomline">
-          <span>Sala:</span> <b id="roomCode">—</b>
-          <span class="sep"></span>
-          <span>Turno:</span> <b id="turnTxt">—</b>
-          <span class="sep"></span>
-          <span id="forcedTxt"></span>
-        </div>
-
-        <div id="board" class="board"></div>
-
-        <div id="status" class="hint"></div>
-
-        <div class="chat">
-          <div class="chatHeader">Chat de sala</div>
-          <div id="chatLog" class="chatLog"></div>
+        <div class="card">
+          <div class="cardHeader">
+            <h2>Chat global</h2>
+            <span class="pill">Para todos</span>
+          </div>
+          <div id="globalChatLog" class="chatLog tall"></div>
           <div class="chatInputRow">
-            <input id="chatInput" placeholder="Entra a una sala para chatear" disabled />
-            <button id="chatSend" disabled>Enviar</button>
+            <input id="globalChatInput" placeholder="Escribe a todos en el lobby" disabled />
+            <button id="globalChatSend" disabled>Enviar</button>
           </div>
         </div>
       </div>
 
-      <div class="card">
-        <h2>Ranking (Elo)</h2>
-        <button id="btnRefreshLb" disabled>Actualizar</button>
-        <div class="tableWrap">
-          <table class="tbl" id="lbTable">
-            <thead>
-              <tr>
-                <th>#</th><th>Usuario</th><th>Elo</th><th>W</th><th>L</th><th>D</th><th>J</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+      <div class="grid game-grid">
+        <div class="card controlsCard">
+          <h2>Controles de partida</h2>
+          <div class="infoLine">Sala: <span id="roomCode">—</span></div>
+          <div class="players">
+            <div class="player" id="playerRed">🔴 Rojo: —</div>
+            <div class="player" id="playerBlack">⚫ Negro: —</div>
+          </div>
+          <div class="infoLine" id="turnTxt">Turno: —</div>
+          <div class="infoLine" id="forcedTxt">Capturas obligatorias: —</div>
+          <div class="infoLine" id="pendingTxt"></div>
+          <div class="row stack">
+            <button id="btnRequestDraw" disabled>Solicitar tablas</button>
+            <button id="btnResign" class="danger" disabled>Rendirse</button>
+          </div>
         </div>
-        <div class="hint">Solo partidas PvP cuentan para el ranking.</div>
+
+        <div class="card boardCard">
+          <div class="cardHeader">
+            <h2>Tablero</h2>
+            <span class="pill ghost" id="rolePill">Observando</span>
+          </div>
+          <div id="board" class="board"></div>
+          <div id="status" class="hint"></div>
+        </div>
+
+        <div class="card chatCard">
+          <div class="cardHeader">
+            <h2>Chat de partida</h2>
+            <span class="pill ghost">Solo jugadores</span>
+          </div>
+          <div id="chatLog" class="chatLog"></div>
+          <div class="chatInputRow">
+            <input id="chatInput" placeholder="Solo dentro de la partida" disabled />
+            <button id="chatSend" disabled>Enviar</button>
+          </div>
+          <div class="hint">Observadores usan el chat global.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rankingDrawer" class="drawer hidden">
+    <div class="drawerContent">
+      <div class="drawerHeader">
+        <h2>Ranking global</h2>
+        <button id="btnCloseRanking" class="ghost">Cerrar</button>
+      </div>
+      <div class="tableWrap">
+        <table class="tbl" id="lbTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Usuario</th><th>Elo</th><th>W</th><th>L</th><th>D</th><th>J</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="resumeModal" class="modal hidden">
+    <div class="modalCard">
+      <h3>Partida activa</h3>
+      <p>Tienes una partida en curso. ¿Deseas reanudarla?</p>
+      <div id="resumeInfo" class="hint"></div>
+      <div class="row">
+        <button id="btnResume">Reanudar</button>
+        <button id="btnSkipResume" class="ghost">Volver al lobby</button>
       </div>
     </div>
   </div>
