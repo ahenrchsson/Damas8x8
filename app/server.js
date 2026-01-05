@@ -32,7 +32,8 @@ const {
   serializeMoveMap,
   hasAnyPieces,
   colorOf,
-  moveSignature
+  moveSignature,
+  coordKey
 } = require("./game");
 
 let VERSION = "v1.1.1";
@@ -489,7 +490,26 @@ async function main() {
     if (!room.ai || room.over) return;
     if (room.turn !== room.aiColor) return;
 
-    room.pendingBlow = null;
+    if (room.pendingBlow && (!room.pendingBlow.offeredTo || room.pendingBlow.offeredTo === room.turn)) {
+      const blowTarget = (room.pendingBlow.blowablePieces || [])[0];
+      if (blowTarget) {
+        const piece = room.board[blowTarget.r]?.[blowTarget.c];
+        if (piece && colorOf(piece) === room.pendingBlow.pieceColor) {
+          room.board[blowTarget.r][blowTarget.c] = 0;
+        }
+      }
+      room.pendingBlow = null;
+      room.missedCapture = null;
+      const blowCheck = recompute(room);
+      io.to(room.code).emit("state", publicStateFor(room));
+      if (blowCheck.over) {
+        io.to(room.code).emit("gameOver", { ...blowCheck, reason: blowCheck.reason || "blown" });
+        await finalizeRatedGame(room, blowCheck.winner === "red" || blowCheck.winner === "black" ? blowCheck.winner : null);
+        await cleanupRoom(room, "finished");
+        return;
+      }
+    }
+
     room.pendingDraw = null;
     room.missedCapture = null;
     const { move, generated } = pickRandomMove(room.board, room.turn);
@@ -736,6 +756,14 @@ async function main() {
       };
     }
 
+    function normalizeCoord(raw) {
+      if (!raw) return null;
+      const r = Number(raw.r ?? raw[0]);
+      const c = Number(raw.c ?? raw[1]);
+      if (Number.isNaN(r) || Number.isNaN(c)) return null;
+      return { r, c };
+    }
+
     socket.on("move", async ({ code, move }) => {
       const room = rooms.get(code);
       if (!room) return;
@@ -758,27 +786,36 @@ async function main() {
       const match = legalMoves.find((m) => moveSignature(m) === moveSignature(parsedMove));
       if (!match) return socket.emit("err", { error: "illegal_move" });
 
-      const skippedCapture = (generated.allCaptures?.length || 0) > 0 && !match.isCapture;
+      const piecesWithCapture = generated.piecesWithCapture || [];
+      const skippedCapture = piecesWithCapture.length > 0 && !match.isCapture;
 
       room.board = applyMove(room.board, match);
       room.lastMove = { color: room.turn, move: match, missedCapture: skippedCapture ? true : false };
+      const prevTurn = room.turn;
+      const blowablePieces = skippedCapture ? piecesWithCapture.map((p) => {
+        const movedThisPiece = coordKey(p) === coordKey(match.pieceFrom);
+        const currentPos = movedThisPiece ? match.pieceTo : p;
+        return currentPos;
+      }).filter((pos) => {
+        const piece = room.board[pos.r]?.[pos.c];
+        return piece && colorOf(piece) === prevTurn;
+      }) : [];
       room.missedCapture = skippedCapture ? {
-        by: room.turn,
-        turn: room.turnCount,
-        piece: match.pieceFrom,
-        landing: match.pieceTo,
-        available: generated.allCaptures?.map((m) => m.captures) || [],
+        byPlayer: room.players[prevTurn]?.id || null,
+        byColor: prevTurn,
+        blowablePieces,
+        turnNumber: room.turnCount,
         ts: Date.now()
       } : null;
 
-      const prevTurn = room.turn;
       room.turn = flipColor(room.turn);
       room.turnCount += 1;
-      room.pendingBlow = skippedCapture ? {
-        target: [match.pieceTo.r, match.pieceTo.c],
+      room.pendingBlow = skippedCapture && blowablePieces.length > 0 ? {
+        blowablePieces,
         pieceColor: prevTurn,
         offeredTo: room.turn,
         ts: Date.now(),
+        turnNumber: room.turnCount - 1,
         missedCapture: room.missedCapture
       } : null;
       room.pendingDraw = null; // limpiar solicitudes viejas al mover
@@ -787,7 +824,7 @@ async function main() {
       sendState(room);
 
       if (room.pendingBlow && room.players[room.turn]?.sid) {
-        io.to(room.players[room.turn].sid).emit("blowOffered", { code: room.code, target: room.pendingBlow.target });
+        io.to(room.players[room.turn].sid).emit("blowOffered", { code: room.code, blowablePieces: room.pendingBlow.blowablePieces });
       }
 
       if (chk.over) {
@@ -803,7 +840,7 @@ async function main() {
       }
     });
 
-    socket.on("blowPiece", async ({ code }) => {
+    socket.on("blowPiece", async ({ code, target }) => {
       const room = rooms.get(code);
       if (!room || !room.pendingBlow) return;
       const color = ensurePlayer(room);
@@ -811,10 +848,16 @@ async function main() {
       if (color !== room.turn) return socket.emit("err", { error: "not_your_turn" });
       if (room.pendingBlow.offeredTo && room.pendingBlow.offeredTo !== color) return socket.emit("err", { error: "not_allowed" });
 
-      const [r, c] = room.pendingBlow.target;
-      const piece = room.board[r]?.[c];
+      const blowable = room.pendingBlow.blowablePieces || [];
+      const chosen = normalizeCoord(target) || (blowable.length === 1 ? blowable[0] : null);
+      if (!chosen) return socket.emit("err", { error: "invalid_blow_target" });
+
+      const isAllowed = blowable.some((p) => p.r === chosen.r && p.c === chosen.c);
+      if (!isAllowed) return socket.emit("err", { error: "invalid_blow_target" });
+
+      const piece = room.board[chosen.r]?.[chosen.c];
       if (piece && colorOf(piece) === room.pendingBlow.pieceColor) {
-        room.board[r][c] = 0;
+        room.board[chosen.r][chosen.c] = 0;
       }
       room.pendingBlow = null;
       room.missedCapture = null;

@@ -244,13 +244,31 @@ function filterByQuantityAndQuality(captures) {
   return withMax.filter(m => m.captures.filter(c => c.pieceType === "king").length === maxKings);
 }
 
+function dedupeCaptureSources(captures) {
+  const seen = new Set();
+  const pieces = [];
+  for (const mv of captures) {
+    const key = coordKey(mv.pieceFrom);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pieces.push(mv.pieceFrom);
+  }
+  return pieces;
+}
+
+function getPiecesThatCanCapture(board, color) {
+  const captures = generateAllCaptures(board, color);
+  return dedupeCaptureSources(captures);
+}
+
 function computeMoves(board, turnColor) {
   const allCaptures = generateAllCaptures(board, turnColor);
+  const piecesWithCapture = dedupeCaptureSources(allCaptures);
   const filteredCaptures = filterByQuantityAndQuality(allCaptures);
   const forced = allCaptures.length > 0;
   const normals = generateNormalMoves(board, turnColor);
   const moves = allCaptures.concat(normals);
-  return { forced, moves, captures: filteredCaptures, normals, allCaptures };
+  return { forced, moves, captures: filteredCaptures, normals, allCaptures, piecesWithCapture };
 }
 
 function applyMove(board, move) {
@@ -305,5 +323,6 @@ module.exports = {
   coordKey,
   moveSignature,
   generateKingCaptureSequences,
-  generateManCaptureSequences
+  generateManCaptureSequences,
+  getPiecesThatCanCapture
 };
