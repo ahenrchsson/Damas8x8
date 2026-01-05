@@ -36,12 +36,12 @@ const {
   coordKey
 } = require("./game");
 
-let VERSION = "v1.1.1";
+let VERSION = "v1.1.2";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.1.1";
+  VERSION = "v1.1.2";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -256,6 +256,17 @@ async function main() {
     room.recommendedCaptureMap = serializeMoveMap(room.availableCaptures);
   }
 
+  function recordLastMove(room, color, move) {
+    room.lastMove = { color, move };
+    const turnNumber = room.turnCount;
+    room.lastMovedByColor[color] = {
+      from: move.pieceFrom,
+      to: move.pieceTo,
+      turnNumber,
+      color
+    };
+  }
+
   function makeRoomState({ code, name, mode, players, ai = false, aiColor = null, difficulty = null }) {
     const board = initialBoard();
     const turn = "red"; // rojo parte
@@ -280,6 +291,7 @@ async function main() {
       ai,
       aiColor,
       lastMove: null,
+      lastMovedByColor: { red: null, black: null },
       over: false,
       pendingDraw: null,
       pendingBlow: null,
@@ -309,6 +321,10 @@ async function main() {
       captureMap: room.captureMap,
       recommendedCaptureMap: room.recommendedCaptureMap,
       legalMoves: room.legalMoves || [],
+      lastMovedByColor: {
+        red: room.lastMovedByColor.red ? { ...room.lastMovedByColor.red } : null,
+        black: room.lastMovedByColor.black ? { ...room.lastMovedByColor.black } : null
+      },
       players: {
         red: room.players.red ? { id: room.players.red.id, username: room.players.red.username } : null,
         black: room.players.black ? { id: room.players.black.id, username: room.players.black.username } : (room.ai ? { username: "AI" } : null)
@@ -521,10 +537,10 @@ async function main() {
       console.warn("AI generated illegal move, retrying");
       if (legalMoves.length === 0) return;
       room.board = applyMove(room.board, legalMoves[0]);
-      room.lastMove = { color: room.aiColor, move: legalMoves[0] };
+      recordLastMove(room, room.aiColor, legalMoves[0]);
     } else {
       room.board = applyMove(room.board, match);
-      room.lastMove = { color: room.aiColor, move: match };
+      recordLastMove(room, room.aiColor, match);
     }
     room.turn = flipColor(room.turn);
     room.turnCount += 1;
@@ -790,7 +806,8 @@ async function main() {
       const skippedCapture = piecesWithCapture.length > 0 && !match.isCapture;
 
       room.board = applyMove(room.board, match);
-      room.lastMove = { color: room.turn, move: match, missedCapture: skippedCapture ? true : false };
+      recordLastMove(room, room.turn, match);
+      if (skippedCapture) room.lastMove.missedCapture = true;
       const prevTurn = room.turn;
       const blowablePieces = skippedCapture ? piecesWithCapture.map((p) => {
         const movedThisPiece = coordKey(p) === coordKey(match.pieceFrom);

@@ -136,3 +136,17 @@ test("promotion ends man capture sequence", () => {
   assert.strictEqual(mv.captures.length, 1, "la secuencia termina al coronar");
   assert.strictEqual(mv.path.length, 2, "no debe encadenar capturas post-coronación");
 });
+
+test("kings are considered for capture preference", () => {
+  const b = emptyBoard();
+  b[6][0] = 2; // dama roja
+  b[5][1] = -1; // peón negro
+  b[2][4] = -1; // segundo negro en la misma diagonal
+
+  const res = computeMoves(b, "red");
+  assert.ok(res.forced, true);
+  assert.ok(res.piecesWithCapture.some((p) => p.r === 6 && p.c === 0), "la dama debe contarse como pieza capturadora");
+  const recommended = res.captures || [];
+  assert.ok(recommended.length > 0, "debe haber capturas recomendadas");
+  assert.ok(recommended.every((m) => m.captures.length >= 1), "las rutas recomendadas de dama son capturas");
+});

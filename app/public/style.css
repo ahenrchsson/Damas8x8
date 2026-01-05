@@ -85,6 +85,11 @@ button.danger { background: #e04f5f; }
 .cell.target { box-shadow: inset 0 0 0 3px rgba(0, 255, 170, .55); cursor:pointer; }
 .cell.forced { box-shadow: inset 0 0 0 3px rgba(255, 199, 0, .4); }
 .cell.blowTarget { box-shadow: inset 0 0 0 3px rgba(224, 79, 95, .55); }
+.cell.preferredCapture { box-shadow: inset 0 0 0 3px rgba(0, 180, 255, .5); }
+.cell.lastMovedPiece { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .18); }
+.cell.lastMovedPiece::after { content: "●"; position:absolute; top:6px; right:6px; font-size: 10px; opacity:.7; color:#9ef0c3; }
+.cell.lastMovedOpponent { box-shadow: inset 0 0 0 3px rgba(255, 215, 0, .45); }
+.cell.lastMovedOpponent::after { color:#ffd580; }
 
 .piece { width: 76%; height: 76%; border-radius: 999px; box-shadow: inset 0 0 0 2px rgba(255,255,255,.08), 0 8px 16px rgba(0,0,0,.35); position: relative; }
 .red { background:#d64a4a; }
@@ -132,6 +137,27 @@ button.danger { background: #e04f5f; }
 
 .modal { position: fixed; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(0,0,0,.55); z-index: 12; }
 .modalCard { background:#151a22; border:1px solid #232a36; border-radius: 14px; padding: 16px; width: 360px; max-width: 92vw; box-shadow: 0 16px 28px rgba(0,0,0,.4); }
+.endgameCard { position: relative; overflow:hidden; padding-top: 24px; }
+.endgameCard .celebration { position:absolute; inset:0; pointer-events:none; }
+.endgameCard .confetti { position:absolute; inset:0; opacity:0; transition: opacity .2s ease; }
+.endgameCard.win .confetti { opacity:1; }
+.endgameCard .confetti span { position:absolute; width:8px; height:14px; background: linear-gradient(180deg, #ffd580, #ff6b6b); border-radius: 2px; animation: confettiFall 2.8s linear infinite; opacity:.85; }
+.endgameCard .confetti span:nth-child(2) { left:20%; animation-delay: -.2s; background: linear-gradient(180deg, #9ef0c3, #2b6cff); }
+.endgameCard .confetti span:nth-child(3) { left:35%; animation-delay: -.8s; background: linear-gradient(180deg, #ff9ee2, #ff6b6b); }
+.endgameCard .confetti span:nth-child(4) { left:50%; animation-delay: -.4s; }
+.endgameCard .confetti span:nth-child(5) { left:65%; animation-delay: -1s; background: linear-gradient(180deg, #8cb4ff, #2b6cff); }
+.endgameCard .confetti span:nth-child(6) { left:78%; animation-delay: -.6s; background: linear-gradient(180deg, #ffd580, #ff9ee2); }
+.endgameCard .confetti span:nth-child(7) { left:88%; animation-delay: -.1s; background: linear-gradient(180deg, #9ef0c3, #ffd580); }
+.endgameCard .confetti span:nth-child(8) { left:12%; animation-delay: -.5s; background: linear-gradient(180deg, #2b6cff, #8cb4ff); }
+.endgameCard .glow { position:absolute; inset:0; background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.08), rgba(43,108,255,.04), transparent 55%); filter: blur(12px); opacity:.6; }
+.tipLine { margin: 8px 0 4px; background:#10141d; border:1px solid #232a36; border-radius: 10px; padding: 10px; font-size: 13px; color:#cfe3ff; }
+.endgameCard h3 { margin-top: 0; }
+.endgameCard.win { box-shadow: 0 12px 28px rgba(0,0,0,.5), 0 0 0 1px rgba(43,108,255,.25); }
+.endgameCard.lose { border-color:#3a1f1f; }
+.endgameCard.draw { border-color:#2a3242; }
+.tipLine::before { content:"💡 "; opacity:.9; }
+.celebration { mix-blend-mode: screen; }
+.endgameCard .row.stack button { width:100%; }
 
 .mobileOnly { display:none; }
 .versionFloating { position: fixed; right: 12px; bottom: 12px; background:#0f1115; border:1px solid #2a3242; border-radius: 12px; padding: 8px 12px; font-size: 12px; color:#e7e7e7; opacity:.9; z-index: 6; }
@@ -172,4 +198,10 @@ body:not(.inRoom) { --board-safe-area: 340px; }
   .movesCard { border:2px solid #232a36; }
   .movePanelActions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
   .lowerPanel { position: sticky; left: unset; right: unset; bottom: 0; max-height: none; overflow: visible; }
+}
+
+@keyframes confettiFall {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 0; }
+  10% { opacity:1; }
+  100% { transform: translateY(360px) rotate(360deg); opacity: 0; }
 }
