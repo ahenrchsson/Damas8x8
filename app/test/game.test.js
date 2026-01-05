@@ -1,5 +1,10 @@
 const assert = require("assert");
-const { computeMoves, getPiecesThatCanCapture } = require("../game");
+const {
+  computeMoves,
+  getPiecesThatCanCapture,
+  pickLegalAIMove,
+  moveSignature
+} = require("../game");
 
 function emptyBoard() {
   return Array.from({ length: 8 }, () => Array(8).fill(0));
@@ -149,4 +154,38 @@ test("kings are considered for capture preference", () => {
   const recommended = res.captures || [];
   assert.ok(recommended.length > 0, "debe haber capturas recomendadas");
   assert.ok(recommended.every((m) => m.captures.length >= 1), "las rutas recomendadas de dama son capturas");
+});
+
+test("king capture is invalid without landing square", () => {
+  const b = emptyBoard();
+  b[2][1] = 2; // dama roja
+  b[1][0] = -1; // pieza negra en el borde, sin casilla para caer
+
+  const res = computeMoves(b, "red");
+  const captures = res.moves.filter((m) => m.isCapture);
+  assert.strictEqual(captures.length, 0, "no debe incluir captura sin casilla de aterrizaje");
+});
+
+test("man capture is invalid when landing square is occupied", () => {
+  const b = emptyBoard();
+  b[4][3] = 1; // peón rojo
+  b[3][4] = -1; // pieza negra adyacente
+  b[2][5] = -1; // casilla de aterrizaje ocupada
+
+  const res = computeMoves(b, "red");
+  const captures = res.moves.filter((m) => m.isCapture);
+  assert.strictEqual(captures.length, 0, "no debe capturar si la casilla detrás está ocupada");
+});
+
+test("AI move selection always returns a legal move", () => {
+  const b = emptyBoard();
+  b[5][0] = 1; // rojo
+  b[4][1] = -1; // negro capturable
+  b[2][2] = -1; // segundo negro para asegurar al menos un movimiento
+
+  const { move, generated, legalMoves } = pickLegalAIMove(b, "red");
+  const sigs = (legalMoves || []).map((m) => moveSignature(m));
+  assert.ok(move, "la IA debe devolver un movimiento");
+  assert.ok(sigs.includes(moveSignature(move)), "el movimiento de IA debe estar en legalMoves");
+  assert.ok(generated.moves.some((m) => moveSignature(m) === moveSignature(move)), "el movimiento debe provenir del generador");
 });

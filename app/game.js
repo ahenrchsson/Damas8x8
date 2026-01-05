@@ -141,39 +141,42 @@ function generateKingCaptureSequences(board, from) {
     for (const [dr, dc] of dirsForPiece(v, { capture: true })) {
       let enemy = null;
       let step = 1;
+      const landingSquares = [];
       while (true) {
         const nr = node.r + dr * step;
         const nc = node.c + dc * step;
         if (!inBounds(nr, nc)) break;
         const cell = node.board[nr][nc];
         if (cell === 0) {
-          if (enemy) {
-            // aterrizaje detrás de la captura
-            const nb = cloneBoard(node.board);
-            nb[node.r][node.c] = 0;
-            nb[enemy.r][enemy.c] = 0;
-            nb[nr][nc] = v;
-            dfs({
-              r: nr,
-              c: nc,
-              board: nb,
-              caps: node.caps.concat([capturedMeta(node.board, enemy.r, enemy.c)]),
-              path: node.path.concat([coord(nr, nc)])
-            });
-            extended = true;
-          }
+          if (enemy) landingSquares.push({ r: nr, c: nc });
           step += 1;
           continue;
         }
 
         const cellColor = colorOf(cell);
-        if (cellColor === col) break; // bloqueado
+        if (cellColor === col) break; // bloqueado por pieza propia
         if (cellColor === opponentColor(col)) {
-          if (enemy) break; // dos piezas en la misma diagonal -> no se puede
+          if (enemy) break; // dos piezas en la misma diagonal -> captura inválida
           enemy = { r: nr, c: nc };
           step += 1;
           continue;
         }
+      }
+
+      // Debe existir al menos una casilla vacía detrás de la pieza enemiga
+      for (const landing of landingSquares) {
+        const nb = cloneBoard(node.board);
+        nb[node.r][node.c] = 0;
+        nb[enemy.r][enemy.c] = 0;
+        nb[landing.r][landing.c] = v;
+        dfs({
+          r: landing.r,
+          c: landing.c,
+          board: nb,
+          caps: node.caps.concat([capturedMeta(node.board, enemy.r, enemy.c)]),
+          path: node.path.concat([coord(landing.r, landing.c)])
+        });
+        extended = true;
       }
     }
 
@@ -312,6 +315,24 @@ function moveSignature(move) {
   return `${pathSig}#${capsSig}`;
 }
 
+function pickLegalAIMove(board, color) {
+  const generated = computeMoves(board, color);
+  const legalMoves = generated.moves || [];
+  if (!legalMoves.length) return { move: null, generated, legalMoves };
+
+  const hasCaptures = (generated.allCaptures || []).length > 0;
+  const preferred = hasCaptures
+    ? ((generated.captures || []).length ? generated.captures : generated.allCaptures)
+    : generated.normals;
+  const candidatePool = (preferred && preferred.length ? preferred : legalMoves)
+    .filter((mv) => legalMoves.some((lm) => moveSignature(lm) === moveSignature(mv)));
+
+  const pool = candidatePool.length ? candidatePool : legalMoves;
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  const matched = legalMoves.find((m) => moveSignature(m) === moveSignature(chosen)) || null;
+  return { move: matched, generated, legalMoves };
+}
+
 module.exports = {
   initialBoard,
   computeMoves,
@@ -324,5 +345,6 @@ module.exports = {
   moveSignature,
   generateKingCaptureSequences,
   generateManCaptureSequences,
-  getPiecesThatCanCapture
+  getPiecesThatCanCapture,
+  pickLegalAIMove
 };

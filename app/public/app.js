@@ -232,6 +232,12 @@ function initSocket() {
     resumeModal.classList.remove("hidden");
     updateFocusMode(false);
   });
+  socket.on("resumeCancelled", () => {
+    resumeModal.classList.add("hidden");
+    resumeCode = null;
+    updateFocusMode(false);
+    refreshLobby();
+  });
 
   socket.on("roomCreated", ({ code }) => {
     status.textContent = `Sala creada (${code}). Esperando rival u observadores.`;
@@ -945,10 +951,19 @@ btnResume.onclick = () => {
   resumeModal.classList.add("hidden");
   updateFocusMode(true);
 };
-btnSkipResume.onclick = () => {
-  if (resumeCode) socket.emit("declineResume", { code: resumeCode });
+btnSkipResume.onclick = async () => {
+  if (resumeCode) {
+    try {
+      await api("/api/resume/cancel", "POST", { code: resumeCode });
+    } catch (_) {
+      // ignore errors, fallback to socket event
+    }
+    socket?.emit("resume:cancel", { code: resumeCode });
+  }
+  clearRoomState();
   resumeCode = null;
   resumeModal.classList.add("hidden");
+  refreshLobby();
   updateFocusMode(false);
 };
 

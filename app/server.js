@@ -33,15 +33,16 @@ const {
   hasAnyPieces,
   colorOf,
   moveSignature,
-  coordKey
+  coordKey,
+  pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.1.2";
+let VERSION = "v1.1.3";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.1.2";
+  VERSION = "v1.1.3";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -190,6 +191,29 @@ async function main() {
 
   app.get("/api/version", (_req, res) => {
     res.json({ version: VERSION });
+  });
+
+  async function cancelResume(userId, codeHint = null) {
+    const ref = userRoomMap.get(userId);
+    const active = await getActiveRoom(pool, userId);
+    const code = (codeHint || ref?.code || active?.room_code || "").toUpperCase();
+
+    if (ref) userRoomMap.delete(userId);
+    if (active) await clearActiveRoom(pool, userId);
+
+    const room = code ? rooms.get(code) : null;
+    if (room) {
+      const isPlayer = room.players.red?.id === userId || room.players.black?.id === userId;
+      if (isPlayer && room.ai) {
+        await cleanupRoom(room, "resume_cancelled", userId);
+      }
+    }
+  }
+
+  app.post("/api/resume/cancel", requireAuth, async (req, res) => {
+    const code = (req.body?.code || "").toUpperCase();
+    await cancelResume(req.session.userId, code);
+    res.json({ ok: true });
   });
 
   const closeRoomSchema = z.object({
@@ -490,18 +514,6 @@ async function main() {
     io.to(lobbyRoomName).emit("lobbyRooms", lobbyList());
   }
 
-  function pickRandomMove(board, color) {
-    const generated = computeMoves(board, color);
-    const hasCaptures = generated.allCaptures?.length > 0;
-    const prioritized = hasCaptures ? (generated.captures?.length ? generated.captures : generated.allCaptures) : generated.normals;
-    const pool = prioritized && prioritized.length ? prioritized : generated.moves;
-    if (!pool || pool.length === 0) return { move: null, generated };
-    return {
-      move: pool[Math.floor(Math.random() * pool.length)],
-      generated
-    };
-  }
-
   async function maybePlayAI(room) {
     if (!room.ai || room.over) return;
     if (room.turn !== room.aiColor) return;
@@ -528,20 +540,16 @@ async function main() {
 
     room.pendingDraw = null;
     room.missedCapture = null;
-    const { move, generated } = pickRandomMove(room.board, room.turn);
-    const legalMoves = generated.moves || [];
-    if (!move) return;
+    const { move, generated, legalMoves = [] } = pickLegalAIMove(room.board, room.turn);
+    if (!move || legalMoves.length === 0) return;
 
     const match = legalMoves.find((m) => moveSignature(m) === moveSignature(move));
+    const chosen = match || legalMoves[0];
     if (!match) {
-      console.warn("AI generated illegal move, retrying");
-      if (legalMoves.length === 0) return;
-      room.board = applyMove(room.board, legalMoves[0]);
-      recordLastMove(room, room.aiColor, legalMoves[0]);
-    } else {
-      room.board = applyMove(room.board, match);
-      recordLastMove(room, room.aiColor, match);
+      console.warn("AI generated illegal move, falling back to first legal move");
     }
+    room.board = applyMove(room.board, chosen);
+    recordLastMove(room, room.aiColor, chosen);
     room.turn = flipColor(room.turn);
     room.turnCount += 1;
 
@@ -728,10 +736,18 @@ async function main() {
       sendState(room);
     });
 
-    socket.on("declineResume", ({ code }) => {
+    async function handleResumeCancel(code) {
       if (!ensureAuth()) return;
-      const ref = userRoomMap.get(socket.data.userId);
-      if (ref?.code === code) userRoomMap.delete(socket.data.userId);
+      await cancelResume(socket.data.userId, code);
+      socket.emit("resumeCancelled", { ok: true });
+    }
+
+    socket.on("declineResume", async ({ code }) => {
+      await handleResumeCancel(code);
+    });
+
+    socket.on("resume:cancel", async ({ code }) => {
+      await handleResumeCancel(code);
     });
 
     socket.on("room:close", async ({ code, reason }) => {
