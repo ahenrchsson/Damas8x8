@@ -1,5 +1,5 @@
 const assert = require("assert");
-const { computeMoves } = require("../game");
+const { computeMoves, getPiecesThatCanCapture } = require("../game");
 
 function emptyBoard() {
   return Array.from({ length: 8 }, () => Array(8).fill(0));
@@ -32,6 +32,26 @@ test("enforces capture obligation and Ley de Calidad", () => {
   assert.strictEqual(chosen.captures.length, 1);
   assert.strictEqual(chosen.captures[0].pieceType, "king");
   assert.ok(res.moves.some((m) => !m.isCapture), "debe permitir movimientos simples para habilitar soplar");
+});
+
+test("detects every piece that can capture", () => {
+  const b = emptyBoard();
+  b[5][0] = 1; // rojo con captura
+  b[4][1] = -1;
+  b[2][4] = 1; // segundo rojo con captura
+  b[1][5] = -1;
+
+  const pieces = getPiecesThatCanCapture(b, "red");
+  const sigs = pieces.map((p) => `${p.r},${p.c}`);
+  assert.strictEqual(pieces.length, 2);
+  assert.ok(sigs.includes("5,0"));
+  assert.ok(sigs.includes("2,4"));
+
+  const res = computeMoves(b, "red");
+  const resSigs = res.piecesWithCapture.map((p) => `${p.r},${p.c}`);
+  assert.deepStrictEqual(new Set(resSigs).size, 2);
+  assert.ok(resSigs.includes("5,0"));
+  assert.ok(resSigs.includes("2,4"));
 });
 
 test("flying kings chain captures with variable landings", () => {

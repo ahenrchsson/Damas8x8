@@ -84,6 +84,7 @@ let resumeCode = null;
 let mobileMovesCollapsed = false;
 let panelCollapsed = false;
 let activeTab = "lobbyPanel";
+let awaitingBlowSelection = false;
 
 function hasActiveGame() {
   if (state && currentRoom) return true;
@@ -243,10 +244,22 @@ function initSocket() {
     roomCode.textContent = st.code;
     turnTxt.textContent = `Turno: ${st.turn}`;
     forcedTxt.textContent = st.forced ? "Capturas recomendadas visibles (opcionales)" : "Movimiento libre";
-    const blowSq = st.pendingBlow?.target ? squareName({ r: st.pendingBlow.target[0], c: st.pendingBlow.target[1] }) : "";
-    pendingTxt.textContent = st.pendingDraw
-      ? `Solicitud de tablas por ${st.pendingDraw.by}`
-      : (st.pendingBlow ? `Puedes soplar ficha rival${blowSq ? ` en ${blowSq}` : ""}` : (st.missedCapture ? `Captura omitida por ${st.missedCapture.by}` : ""));
+    const blowTargets = normalizeBlowablePieces(st.pendingBlow?.blowablePieces);
+    if (!st.pendingBlow) awaitingBlowSelection = false;
+    let pendingMsg = "";
+    if (st.pendingDraw) {
+      pendingMsg = `Solicitud de tablas por ${st.pendingDraw.by}`;
+    } else if (st.pendingBlow && blowTargets.length) {
+      const blowLabel = blowTargets.length === 1 ? ` en ${squareName(blowTargets[0])}` : ` (${blowTargets.length} fichas disponibles)`;
+      pendingMsg = `Puedes soplar ficha rival${blowLabel}`;
+      if (awaitingBlowSelection && blowTargets.length > 1) {
+        pendingMsg += " • Haz click en una ficha resaltada para soplar.";
+      }
+    } else if (st.missedCapture) {
+      const offenderName = playerNameById(st.missedCapture.byPlayer) || st.missedCapture.byColor || "rival";
+      pendingMsg = `Captura omitida por ${offenderName}`;
+    }
+    pendingTxt.textContent = pendingMsg;
     rolePill.textContent = currentRole === "player" ? `Jugando (${myColor || ""})` : "Observando";
     playerRed.textContent = `🔴 Rojo: ${st.players.red ? st.players.red.username : "—"}`;
     playerBlack.textContent = `⚫ Negro: ${st.players.black ? st.players.black.username : "—"}`;
@@ -307,15 +320,22 @@ function initSocket() {
     socket.emit("respondDraw", { code, accept });
   });
 
-  socket.on("blowOffered", ({ code, target }) => {
+  socket.on("blowOffered", ({ code, blowablePieces }) => {
     if (code !== currentRoom) return;
-    let coordTxt = "";
-    if (target && Array.isArray(target)) {
-      const [r, c] = target;
-      coordTxt = ` (${squareName({ r, c })})`;
+    const targets = normalizeBlowablePieces(blowablePieces);
+    if (!targets.length) return;
+    const coordTxt = targets.length === 1
+      ? ` (${squareName(targets[0])})`
+      : ` (${targets.length} opciones: ${targets.map(squareName).join(", ")})`;
+    const accept = window.confirm(`El rival omitió una captura obligatoria${coordTxt}. ${targets.length > 1 ? "Elige cuál soplar haciendo click en una ficha resaltada." : "¿Soplar ficha?"}`);
+    if (accept) {
+      if (targets.length === 1) {
+        socket.emit("blowPiece", { code, target: targets[0] });
+      } else {
+        awaitingBlowSelection = true;
+        status.textContent = "Selecciona en el tablero la ficha a soplar.";
+      }
     }
-    const accept = window.confirm(`El rival omitió una captura recomendada${coordTxt}. ¿Soplar ficha?`);
-    if (accept) socket.emit("blowPiece", { code });
   });
 }
 
@@ -381,6 +401,14 @@ let currentPreviewBadges = [];
 function coordKey(c) { return `${c.r},${c.c}`; }
 function parseKey(key) { const [r, c] = key.split(",").map(Number); return { r, c }; }
 function squareName({ r, c }) { return `${files[c]}${8 - r}`; }
+function normalizeBlowablePieces(list) {
+  return (list || []).map((p) => {
+    const r = Number(p.r ?? p[0]);
+    const c = Number(p.c ?? p[1]);
+    if (Number.isNaN(r) || Number.isNaN(c)) return null;
+    return { r, c };
+  }).filter(Boolean);
+}
 function moveSig(mv) {
   if (!mv) return "";
   const pathSig = (mv.path || []).map((p) => `${p.r},${p.c}`).join("|");
@@ -582,6 +610,13 @@ function submitMove(move) {
   renderMovePanel();
 }
 
+function blowPieceAt(coord) {
+  if (!socket || !currentRoom || !socketReady) return;
+  if (!coord) return;
+  socket.emit("blowPiece", { code: currentRoom, target: coord });
+  awaitingBlowSelection = false;
+}
+
 function renderBoard() {
   boardEl.innerHTML = "";
   currentTargets = [];
@@ -597,6 +632,8 @@ function renderBoard() {
   const captureMap = state.captureMap || {};
   const myColor = getMyColor();
   const myTurn = myColor && state.turn === myColor && !state.over;
+  const blowablePieces = normalizeBlowablePieces(state.pendingBlow?.blowablePieces);
+  const canBlow = myTurn && currentRole === "player" && blowablePieces.length > 0;
 
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -614,12 +651,16 @@ function renderBoard() {
       }
 
       const key = `${r},${c}`;
-      const isBlowTarget = state.pendingBlow?.target && state.pendingBlow.target[0] === r && state.pendingBlow.target[1] === c;
+      const blowTarget = blowablePieces.find((p) => p.r === r && p.c === c);
+      const isBlowTarget = !!blowTarget;
       if (isBlowTarget) cell.classList.add("blowTarget");
       const hasMovesFrom = Array.isArray(moveMap[key]) && moveMap[key].length > 0;
       const hasCaptureFrom = Array.isArray(captureMap[key]) && captureMap[key].length > 0;
 
-      if ((r + c) % 2 === 1 && myTurn && hasMovesFrom && currentRole === "player") {
+      if (canBlow && blowTarget) {
+        cell.classList.add("clickable");
+        cell.addEventListener("click", () => blowPieceAt(blowTarget));
+      } else if ((r + c) % 2 === 1 && myTurn && hasMovesFrom && currentRole === "player") {
         cell.classList.add("clickable");
         if (hasCaptureFrom) cell.classList.add("forced");
         cell.addEventListener("click", () => startSelection(key));
@@ -674,6 +715,13 @@ function sendGlobalMessage() {
   if (!text) return;
   socket.emit("globalMessage", { text });
   globalChatInput.value = "";
+}
+
+function playerNameById(id) {
+  if (!state || !id) return null;
+  if (state.players.red?.id === id) return state.players.red.username || "Rojo";
+  if (state.players.black?.id === id) return state.players.black.username || "Negro";
+  return null;
 }
 
 function getMyColor() {
