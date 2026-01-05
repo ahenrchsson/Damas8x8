@@ -12,7 +12,7 @@
     <div class="top-actions">
       <button id="btnRanking" class="ghost">Ranking Global</button>
       <div id="meBox" class="me"></div>
-      <div id="versionBadge" class="versionBadge">v1.1.1</div>
+      <div id="versionBadge" class="versionBadge">v1.1.2</div>
     </div>
   </div>
 
@@ -193,9 +193,27 @@
     </div>
   </div>
 
-  <div id="versionFloating" class="versionFloating">v1.1.1</div>
+  <div id="endgameModal" class="modal hidden">
+    <div class="modalCard endgameCard">
+      <div class="celebration">
+        <div class="confetti"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        <div class="glow"></div>
+      </div>
+      <h3 id="endgameTitle">Resultado</h3>
+      <div id="endgameReason" class="hint"></div>
+      <div id="endgameTip" class="tipLine"></div>
+      <div class="row stack">
+        <button id="btnEndgameNew">Nueva partida</button>
+        <button id="btnEndgameLobby" class="ghost">Volver a salas</button>
+        <button id="btnEndgameRanking" class="ghost">Ver ranking</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="versionFloating" class="versionFloating">v1.1.2</div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/tips.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

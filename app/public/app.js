@@ -66,6 +66,14 @@ const lowerContent = $("lowerContent");
 const toggleLowerPanel = $("toggleLowerPanel");
 const tabButtons = document.querySelectorAll(".lowerTabBtn");
 const tabPanels = document.querySelectorAll(".tabPanel");
+const endgameModal = $("endgameModal");
+const endgameTitle = $("endgameTitle");
+const endgameReason = $("endgameReason");
+const endgameTip = $("endgameTip");
+const endgameCard = document.querySelector(".endgameCard");
+const btnEndgameNew = $("btnEndgameNew");
+const btnEndgameLobby = $("btnEndgameLobby");
+const btnEndgameRanking = $("btnEndgameRanking");
 let lastFocusMode = false;
 
 let me = null;
@@ -233,6 +241,7 @@ function initSocket() {
     const prevRoom = currentRoom;
     const wasInRoom = !!state;
     state = { ...st, messages: st.messages || [] };
+    if (!state.over) hideEndgameModal();
     resumeCode = null;
     currentRoom = st.code;
     const myColor = getMyColor();
@@ -286,6 +295,12 @@ function initSocket() {
       chatInput.disabled = true;
       chatSend.disabled = true;
     }
+    if (state) {
+      state.over = true;
+      state.winner = g.winner;
+      state.reason = g.reason;
+    }
+    showEndgameModal(g);
     refreshLeaderboard();
   });
 
@@ -401,6 +416,8 @@ let currentPreviewBadges = [];
 function coordKey(c) { return `${c.r},${c.c}`; }
 function parseKey(key) { const [r, c] = key.split(",").map(Number); return { r, c }; }
 function squareName({ r, c }) { return `${files[c]}${8 - r}`; }
+function isSameCoord(a, b) { return a && b && a.r === b.r && a.c === b.c; }
+function colorOfPiece(v) { return v > 0 ? "red" : (v < 0 ? "black" : null); }
 function normalizeBlowablePieces(list) {
   return (list || []).map((p) => {
     const r = Number(p.r ?? p[0]);
@@ -421,6 +438,45 @@ function pathMatchesPrefix(path, prefix) {
     if (path[i].r !== prefix[i].r || path[i].c !== prefix[i].c) return false;
   }
   return true;
+}
+
+function winnerVariant(result) {
+  const myColor = getMyColor();
+  if (!result) return "draw";
+  if (!result.winner) return "draw";
+  return result.winner === myColor ? "win" : "lose";
+}
+
+function reasonLabel(reason) {
+  switch (reason) {
+    case "no_moves": return "Bloqueo: sin movimientos disponibles.";
+    case "no_pieces": return "Captura total: el rival perdió todas sus fichas.";
+    case "draw": return "Tablas acordadas.";
+    case "resign": return "Rendición.";
+    case "blown": return "Soplido: captura omitida penalizada.";
+    default: return "Fin de la partida.";
+  }
+}
+
+function showEndgameModal(result) {
+  if (!endgameModal || !endgameCard) return;
+  const variant = winnerVariant(result);
+  endgameCard.classList.remove("win", "lose", "draw");
+  endgameCard.classList.add(variant);
+  const myColor = getMyColor();
+  let title = "Empate";
+  if (result?.winner === myColor) title = "¡Ganaste!";
+  else if (result?.winner && result.winner !== myColor) title = "Perdiste";
+  endgameTitle.textContent = title;
+  endgameReason.textContent = reasonLabel(result?.reason);
+  const tip = window.getRandomTip ? window.getRandomTip() : null;
+  endgameTip.textContent = tip || "";
+  endgameTip.style.display = tip ? "block" : "none";
+  endgameModal.classList.remove("hidden");
+}
+
+function hideEndgameModal() {
+  if (endgameModal) endgameModal.classList.add("hidden");
 }
 
 function getCell({ r, c }) {
@@ -630,10 +686,13 @@ function renderBoard() {
 
   const moveMap = state.moveMap || {};
   const captureMap = state.captureMap || {};
+  const recommendedMap = state.recommendedCaptureMap || {};
   const myColor = getMyColor();
   const myTurn = myColor && state.turn === myColor && !state.over;
   const blowablePieces = normalizeBlowablePieces(state.pendingBlow?.blowablePieces);
   const canBlow = myTurn && currentRole === "player" && blowablePieces.length > 0;
+  const lastMoves = state.lastMovedByColor || {};
+  const opponent = myColor ? (myColor === "red" ? "black" : "red") : null;
 
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -656,6 +715,7 @@ function renderBoard() {
       if (isBlowTarget) cell.classList.add("blowTarget");
       const hasMovesFrom = Array.isArray(moveMap[key]) && moveMap[key].length > 0;
       const hasCaptureFrom = Array.isArray(captureMap[key]) && captureMap[key].length > 0;
+      const hasPreferredFrom = Array.isArray(recommendedMap[key]) && recommendedMap[key].length > 0;
 
       if (canBlow && blowTarget) {
         cell.classList.add("clickable");
@@ -663,7 +723,21 @@ function renderBoard() {
       } else if ((r + c) % 2 === 1 && myTurn && hasMovesFrom && currentRole === "player") {
         cell.classList.add("clickable");
         if (hasCaptureFrom) cell.classList.add("forced");
+        if (hasPreferredFrom) cell.classList.add("preferredCapture");
         cell.addEventListener("click", () => startSelection(key));
+      } else if (hasPreferredFrom) {
+        cell.classList.add("preferredCapture");
+      }
+
+      const pieceColor = colorOfPiece(v);
+      const lastByColor = pieceColor ? lastMoves[pieceColor] : null;
+      const lastOpp = opponent ? lastMoves[opponent] : null;
+      if (lastByColor && isSameCoord(lastByColor.to, { r, c })) {
+        cell.classList.add("lastMovedPiece");
+        if (opponent && pieceColor === opponent) cell.classList.add("lastMovedOpponent");
+      } else if (lastOpp && isSameCoord(lastOpp.to, { r, c }) && !pieceColor) {
+        // highlight landing even si la pieza fue eliminada
+        cell.classList.add("lastMovedOpponent");
       }
 
       boardEl.appendChild(cell);
@@ -876,6 +950,22 @@ btnSkipResume.onclick = () => {
   resumeCode = null;
   resumeModal.classList.add("hidden");
   updateFocusMode(false);
+};
+
+btnEndgameLobby.onclick = () => {
+  hideEndgameModal();
+  switchTab("lobbyPanel");
+  updateFocusMode(false);
+};
+btnEndgameNew.onclick = () => {
+  hideEndgameModal();
+  refreshLobby();
+  switchTab("lobbyPanel");
+};
+btnEndgameRanking.onclick = async () => {
+  hideEndgameModal();
+  await refreshLeaderboard();
+  drawer.classList.remove("hidden");
 };
 
 async function refreshLeaderboard() {
