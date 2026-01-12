@@ -59,6 +59,8 @@ const btnConfirmMove = $("btnConfirmMove");
 const btnCancelMove = $("btnCancelMove");
 const versionBadge = $("versionBadge");
 const versionFloating = $("versionFloating");
+const soundToggle = $("soundToggle");
+const soundVolume = $("soundVolume");
 const matchMeta = $("matchMeta");
 const focusPill = $("focusPill");
 const lowerPanel = $("lowerPanel");
@@ -93,6 +95,48 @@ let mobileMovesCollapsed = false;
 let panelCollapsed = false;
 let activeTab = "lobbyPanel";
 let awaitingBlowSelection = false;
+let lastMoveKey = null;
+
+function getAudioManager() {
+  return window.AudioManager || null;
+}
+
+function playClickSound() {
+  const audio = getAudioManager();
+  if (audio?.playClick) audio.playClick();
+}
+
+function updateSoundUI() {
+  const audio = getAudioManager();
+  if (!audio || !soundToggle || !soundVolume) return;
+  soundToggle.textContent = audio.isEnabled() ? "🔊" : "🔇";
+  soundToggle.classList.toggle("muted", !audio.isEnabled());
+  const vol = Math.round(audio.getVolume() * 10);
+  soundVolume.value = Number.isNaN(vol) ? 5 : `${vol}`;
+}
+
+function initSoundControls() {
+  const audio = getAudioManager();
+  if (!audio) return;
+  audio.bindToUserGesture?.();
+  updateSoundUI();
+  if (soundToggle) {
+    soundToggle.addEventListener("click", () => {
+      audio.markUserInteracted?.();
+      audio.setEnabled?.(!audio.isEnabled());
+      updateSoundUI();
+      audio.playClick?.();
+    });
+  }
+  if (soundVolume) {
+    soundVolume.addEventListener("input", () => {
+      audio.markUserInteracted?.();
+      const nextValue = Number(soundVolume.value);
+      audio.setVolume?.(Number.isNaN(nextValue) ? 0.5 : nextValue / 10);
+      updateSoundUI();
+    });
+  }
+}
 
 function hasActiveGame() {
   if (state && currentRoom) return true;
@@ -246,6 +290,7 @@ function initSocket() {
   socket.on("state", (st) => {
     const prevRoom = currentRoom;
     const wasInRoom = !!state;
+    const prevState = state;
     state = { ...st, messages: st.messages || [] };
     if (!state.over) hideEndgameModal();
     resumeCode = null;
@@ -288,6 +333,7 @@ function initSocket() {
     selection = null;
     committedMove = null;
     hoverMove = null;
+    handleStateSounds(prevState, state);
     renderBoard();
     renderChat();
     updateChatControls();
@@ -307,6 +353,12 @@ function initSocket() {
       state.reason = g.reason;
     }
     showEndgameModal(g);
+    const audio = getAudioManager();
+    const myColor = getMyColor();
+    if (audio && myColor && g?.winner) {
+      if (g.winner === myColor) audio.playWin();
+      else audio.playLose();
+    }
     refreshLeaderboard();
   });
 
@@ -350,6 +402,7 @@ function initSocket() {
       : ` (${targets.length} opciones: ${targets.map(squareName).join(", ")})`;
     const accept = window.confirm(`El rival omitió una captura obligatoria${coordTxt}. ${targets.length > 1 ? "Elige cuál soplar haciendo click en una ficha resaltada." : "¿Soplar ficha?"}`);
     if (accept) {
+      playClickSound();
       if (targets.length === 1) {
         socket.emit("blowPiece", { code, target: targets[0] });
       } else {
@@ -437,6 +490,40 @@ function moveSig(mv) {
   const pathSig = (mv.path || []).map((p) => `${p.r},${p.c}`).join("|");
   const capsSig = (mv.captures || []).map((c) => `${c.coord.r},${c.coord.c},${c.pieceType},${c.color}`).join("|");
   return `${pathSig}#${capsSig}`;
+}
+function lastMoveKeyFor(st) {
+  if (!st?.lastMove?.move) return null;
+  const color = st.lastMove.color || "none";
+  const turnNumber = st.lastMovedByColor?.[color]?.turnNumber ?? st.turnCount ?? "0";
+  return `${color}:${turnNumber}:${moveSig(st.lastMove.move)}`;
+}
+function handleStateSounds(prevState, nextState) {
+  const audio = getAudioManager();
+  if (!audio) return;
+  const nextKey = lastMoveKeyFor(nextState);
+  if (!prevState) {
+    lastMoveKey = nextKey;
+    return;
+  }
+  const prevKey = lastMoveKey || lastMoveKeyFor(prevState);
+  const moveChanged = nextKey && nextKey !== prevKey;
+  if (moveChanged && nextState?.lastMove?.move) {
+    const captures = nextState.lastMove.move.captures?.length || 0;
+    if (captures > 0) {
+      audio.playEat();
+    } else {
+      const myColor = getMyColor();
+      if (myColor && nextState.lastMove.color && nextState.lastMove.color !== myColor) {
+        audio.playMove();
+      }
+    }
+  }
+  const pendingCleared = prevState?.pendingBlow && !nextState?.pendingBlow;
+  const missedCleared = prevState?.missedCapture && !nextState?.missedCapture;
+  if (pendingCleared && missedCleared && !moveChanged) {
+    audio.playBlow();
+  }
+  lastMoveKey = nextKey || prevKey;
 }
 function pathMatchesPrefix(path, prefix) {
   if (prefix.length > path.length) return false;
@@ -893,29 +980,37 @@ chatInput.addEventListener("keydown", (e) => {
 
 btnRequestDraw.onclick = () => {
   if (!state || !currentRoom) return;
+  playClickSound();
   socket.emit("requestDraw", { code: currentRoom });
   pendingTxt.textContent = "Solicitud enviada";
 };
 
 btnResign.onclick = () => {
   if (!state || !currentRoom) return;
+  playClickSound();
   const ok = window.confirm("¿Seguro que deseas rendirte?");
   if (ok) socket.emit("resign", { code: currentRoom });
 };
 
 btnLeaveRoom.onclick = () => {
   if (!state || !currentRoom) return;
+  playClickSound();
   const reason = state.mode === "ai" ? "ai_exit" : "leave";
   socket.emit("room:close", { code: currentRoom, reason });
 };
 
 btnFinishRoom.onclick = () => {
   if (!state || !currentRoom) return;
+  playClickSound();
   const reason = "finished";
   socket.emit("room:close", { code: currentRoom, reason });
 };
-btnConfirmMove.onclick = () => submitMove(committedMove);
+btnConfirmMove.onclick = () => {
+  playClickSound();
+  submitMove(committedMove);
+};
 btnCancelMove.onclick = () => {
+  playClickSound();
   selection = null;
   committedMove = null;
   hoverMove = null;
@@ -925,6 +1020,7 @@ btnCancelMove.onclick = () => {
 };
 btnModifyMove.onclick = () => {
   if (!selection) return;
+  playClickSound();
   committedMove = null;
   hoverMove = null;
   refreshSelectionUI();
@@ -941,17 +1037,20 @@ if (movePanelMobileHint) {
 }
 
 btnRanking.onclick = async () => {
+  playClickSound();
   await refreshLeaderboard();
   drawer.classList.remove("hidden");
 };
 btnCloseRanking.onclick = () => drawer.classList.add("hidden");
 
 btnResume.onclick = () => {
+  playClickSound();
   if (resumeCode) socket.emit("rejoinRoom", { code: resumeCode });
   resumeModal.classList.add("hidden");
   updateFocusMode(true);
 };
 btnSkipResume.onclick = async () => {
+  playClickSound();
   if (resumeCode) {
     try {
       await api("/api/resume/cancel", "POST", { code: resumeCode });
@@ -968,16 +1067,19 @@ btnSkipResume.onclick = async () => {
 };
 
 btnEndgameLobby.onclick = () => {
+  playClickSound();
   hideEndgameModal();
   switchTab("lobbyPanel");
   updateFocusMode(false);
 };
 btnEndgameNew.onclick = () => {
+  playClickSound();
   hideEndgameModal();
   refreshLobby();
   switchTab("lobbyPanel");
 };
 btnEndgameRanking.onclick = async () => {
+  playClickSound();
   hideEndgameModal();
   await refreshLeaderboard();
   drawer.classList.remove("hidden");
@@ -1034,6 +1136,7 @@ window.addEventListener("resize", () => {
 (async function init() {
   await refreshMe();
   await loadVersion();
+  initSoundControls();
   if (me) {
     await refreshLeaderboard();
     refreshLobby();

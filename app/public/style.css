@@ -22,6 +22,10 @@ a { color: #8cb4ff; }
 .me { opacity: .9; }
 .top-actions { display:flex; gap: 12px; align-items:center; }
 .versionBadge { background:#0f1115; border:1px solid #2a3242; border-radius: 12px; padding: 6px 10px; font-size: 12px; opacity:.9; }
+.soundControl { display:flex; align-items:center; gap: 8px; background:#0f1115; border:1px solid #2a3242; border-radius: 999px; padding: 4px 8px; }
+.soundControl button { padding: 6px 8px; font-size: 14px; }
+.soundControl button.muted { opacity: .6; }
+.soundControl input[type="range"] { width: 90px; accent-color: #2b6cff; }
 
 .wrap { padding: 18px; max-width: 1480px; margin: 0 auto 32px; width: 100%; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .grid { display:grid; gap: 16px; }

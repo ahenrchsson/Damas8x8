@@ -12,7 +12,11 @@
     <div class="top-actions">
       <button id="btnRanking" class="ghost">Ranking Global</button>
       <div id="meBox" class="me"></div>
-      <div id="versionBadge" class="versionBadge">v1.1.3</div>
+      <div class="soundControl">
+        <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
+        <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
+      </div>
+      <div id="versionBadge" class="versionBadge">v1.2.0</div>
     </div>
   </div>
 
@@ -210,10 +214,11 @@
     </div>
   </div>
 
-  <div id="versionFloating" class="versionFloating">v1.1.3</div>
+  <div id="versionFloating" class="versionFloating">v1.2.0</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>
+  <script src="/audioManager.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
