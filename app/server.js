@@ -37,16 +37,18 @@ const {
   pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.1.3";
+let VERSION = "v1.2.0";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.1.3";
+  VERSION = "v1.2.0";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
 const TRUST_PROXY = (process.env.TRUST_PROXY || "false").toLowerCase() === "true";
+
+console.log(`Starting Damas8x8 ${VERSION}`);
 
 if (!DATABASE_URL) throw new Error("DATABASE_URL faltante");
 
@@ -244,6 +246,7 @@ async function main() {
 
   // ---------- Static ----------
   app.use(express.static(path.join(__dirname, "public")));
+  app.use("/assets", express.static(path.join(__dirname, "assets")));
 
   const server = http.createServer(app);
   const io = new Server(server, { cors: { origin: false } });
