@@ -37,12 +37,12 @@ const {
   pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.2.0";
+let VERSION = "v1.2.1";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.2.0";
+  VERSION = "v1.2.1";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -53,6 +53,8 @@ console.log(`Starting Damas8x8 ${VERSION}`);
 if (!DATABASE_URL) throw new Error("DATABASE_URL faltante");
 
 const pool = makePool(DATABASE_URL);
+const INACTIVITY_MS = 30_000;
+const BUZZ_COOLDOWN_MS = 10_000;
 
 function eloUpdate(rA, rB, scoreA, k = 32) {
   const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
@@ -295,6 +297,7 @@ async function main() {
   }
 
   function makeRoomState({ code, name, mode, players, ai = false, aiColor = null, difficulty = null }) {
+    const now = Date.now();
     const board = initialBoard();
     const turn = "red"; // rojo parte
     const room = {
@@ -323,7 +326,12 @@ async function main() {
       pendingDraw: null,
       pendingBlow: null,
       missedCapture: null,
-      messages: []
+      messages: [],
+      lastActivityAt: {
+        red: players?.red?.id ? now : null,
+        black: players?.black?.id ? now : null
+      },
+      lastBuzzAt: { red: 0, black: 0 }
     };
     computeRoomState(room);
     return room;
@@ -365,6 +373,10 @@ async function main() {
       observers: room.observers.size,
       status: roomStatus(room),
       turnCount: room.turnCount,
+      activity: {
+        red: room.lastActivityAt?.red ?? null,
+        black: room.lastActivityAt?.black ?? null
+      },
       messages: room.messages.slice(-MAX_ROOM_MSGS).map(m => ({
         id: m.id,
         user: m.username,
@@ -396,6 +408,24 @@ async function main() {
   function isUsersTurn(room, userId) {
     const p = room.players[room.turn];
     return p && p.id === userId;
+  }
+
+  function setPlayerActivity(room, color, userId) {
+    if (!room || !color) return;
+    const now = Date.now();
+    if (!room.lastActivityAt) {
+      room.lastActivityAt = { red: null, black: null };
+    }
+    room.lastActivityAt[color] = now;
+    io.to(room.code).emit("activity:update", { color, userId, lastActivityAt: now });
+  }
+
+  function markActivity(room, userId) {
+    if (!room || !userId) return null;
+    const color = room.players.red?.id === userId ? "red" : room.players.black?.id === userId ? "black" : null;
+    if (!color) return null;
+    setPlayerActivity(room, color, userId);
+    return color;
   }
 
   function pushChatMessage(room, { userId, username, text }) {
@@ -659,6 +689,7 @@ async function main() {
       userRoomMap.set(hostUser.id, { code, color: hostColor });
       await setActiveRoom(pool, hostUser.id, code, room.mode);
       await persistColorPreference(hostUser.id, room.mode, hostColor);
+      setPlayerActivity(room, hostColor, hostUser.id);
       emitLobby();
       socket.emit("roomCreated", { code });
       sendState(room);
@@ -697,6 +728,7 @@ async function main() {
       userRoomMap.set(socket.data.userId, { code: roomCode, color: joinColor });
       await setActiveRoom(pool, socket.data.userId, roomCode, room.mode);
       await persistColorPreference(socket.data.userId, "pvp", joinColor);
+      setPlayerActivity(room, joinColor, socket.data.userId);
       emitLobby();
       sendState(room);
     });
@@ -736,6 +768,7 @@ async function main() {
       const color = ref.color;
       if (room.players[color]) room.players[color].sid = socket.id;
       socket.join(code);
+      setPlayerActivity(room, color, socket.data.userId);
       sendState(room);
     });
 
@@ -762,6 +795,56 @@ async function main() {
       if (!isPlayer) return socket.emit("err", { error: "not_player" });
       const closureReason = reason || (room.ai ? "ai_exit" : "leave");
       await cleanupRoom(room, closureReason, uid);
+    });
+
+    socket.on("activity", ({ code }) => {
+      const room = rooms.get((code || "").toUpperCase());
+      if (!room || room.over) return;
+      const userId = socket.data.userId;
+      if (!userId) return;
+      markActivity(room, userId);
+    });
+
+    socket.on("buzz:request", ({ roomId, targetPlayerId }) => {
+      if (!ensureAuth()) return;
+      const room = rooms.get((roomId || "").toUpperCase());
+      if (!room || room.mode !== "pvp" || room.ai) {
+        socket.emit("buzz:denied", { reason: "not_in_room" });
+        console.warn("buzz denied: room missing or invalid", { roomId, by: socket.data.userId });
+        return;
+      }
+      const senderId = socket.data.userId;
+      const senderColor = ensurePlayer(room);
+      if (!senderColor) {
+        socket.emit("buzz:denied", { reason: "not_in_room" });
+        console.warn("buzz denied: sender not player", { roomId, by: senderId });
+        return;
+      }
+      const targetColor = room.players.red?.id === targetPlayerId ? "red" : room.players.black?.id === targetPlayerId ? "black" : null;
+      if (!targetColor || targetColor === senderColor) {
+        socket.emit("buzz:denied", { reason: "not_in_room" });
+        console.warn("buzz denied: invalid target", { roomId, by: senderId, targetPlayerId });
+        return;
+      }
+      const now = Date.now();
+      const lastActivity = room.lastActivityAt?.[targetColor] || 0;
+      if (now - lastActivity < INACTIVITY_MS) {
+        socket.emit("buzz:denied", { reason: "target_active" });
+        console.warn("buzz denied: target active", { roomId, by: senderId, targetPlayerId });
+        return;
+      }
+      const lastBuzzAt = room.lastBuzzAt?.[targetColor] || 0;
+      if (now - lastBuzzAt < BUZZ_COOLDOWN_MS) {
+        socket.emit("buzz:denied", { reason: "cooldown" });
+        console.warn("buzz denied: cooldown", { roomId, by: senderId, targetPlayerId });
+        return;
+      }
+      room.lastBuzzAt[targetColor] = now;
+      const targetSid = room.players[targetColor]?.sid;
+      if (targetSid) {
+        io.to(targetSid).emit("buzz:received", { fromPlayerId: senderId, roomId: room.code });
+      }
+      socket.emit("buzz:sent", { targetPlayerId, roomId: room.code, ts: now });
     });
 
     function normalizeMovePayload(raw) {
@@ -820,6 +903,8 @@ async function main() {
       const legalMoves = generated.moves;
       const match = legalMoves.find((m) => moveSignature(m) === moveSignature(parsedMove));
       if (!match) return socket.emit("err", { error: "illegal_move" });
+
+      markActivity(room, userId);
 
       const piecesWithCapture = generated.piecesWithCapture || [];
       const skippedCapture = piecesWithCapture.length > 0 && !match.isCapture;
@@ -891,6 +976,8 @@ async function main() {
       const isAllowed = blowable.some((p) => p.r === chosen.r && p.c === chosen.c);
       if (!isAllowed) return socket.emit("err", { error: "invalid_blow_target" });
 
+      markActivity(room, socket.data.userId);
+
       const piece = room.board[chosen.r]?.[chosen.c];
       if (piece && colorOf(piece) === room.pendingBlow.pieceColor) {
         room.board[chosen.r][chosen.c] = 0;
@@ -919,6 +1006,8 @@ async function main() {
 
       const msgText = (text || "").toString().trim().slice(0, 240);
       if (!msgText) return;
+
+      markActivity(room, userId);
 
       const msg = pushChatMessage(room, { userId, username, text: msgText });
       if (msg) {
@@ -951,6 +1040,8 @@ async function main() {
       if (!color) return socket.emit("err", { error: "not_player" });
       if (room.pendingDraw) return socket.emit("err", { error: "draw_pending" });
 
+      markActivity(room, socket.data.userId);
+
       room.pendingDraw = { by: color, ts: Date.now() };
       sendState(room);
       const opp = color === "red" ? room.players.black : room.players.red;
@@ -964,6 +1055,8 @@ async function main() {
       if (!color) return socket.emit("err", { error: "not_player" });
       if (!room.pendingDraw) return;
       if (room.pendingDraw.by === color) return socket.emit("err", { error: "cannot_answer_own" });
+
+      markActivity(room, socket.data.userId);
 
       if (accept) {
         room.over = true;
@@ -983,6 +1076,7 @@ async function main() {
       if (!room || room.over) return;
       const color = ensurePlayer(room);
       if (!color) return socket.emit("err", { error: "not_player" });
+      markActivity(room, socket.data.userId);
       const winner = color === "red" ? "black" : "red";
       room.over = true;
       sendState(room);

@@ -76,6 +76,10 @@ const endgameCard = document.querySelector(".endgameCard");
 const btnEndgameNew = $("btnEndgameNew");
 const btnEndgameLobby = $("btnEndgameLobby");
 const btnEndgameRanking = $("btnEndgameRanking");
+const buzzPanel = $("buzzPanel");
+const buzzButton = $("buzzButton");
+const buzzStatus = $("buzzStatus");
+const buzzToast = $("buzzToast");
 let lastFocusMode = false;
 
 let me = null;
@@ -96,6 +100,14 @@ let panelCollapsed = false;
 let activeTab = "lobbyPanel";
 let awaitingBlowSelection = false;
 let lastMoveKey = null;
+let activityByColor = { red: null, black: null };
+let lastBuzzSentAt = 0;
+let buzzToastTimer = null;
+
+const INACTIVITY_MS = 30_000;
+const BUZZ_COOLDOWN_MS = 10_000;
+const ACTIVITY_THROTTLE_MS = 1_000;
+let lastActivitySentAt = 0;
 
 function getAudioManager() {
   return window.AudioManager || null;
@@ -138,6 +150,64 @@ function initSoundControls() {
   }
 }
 
+function showBuzzToast(message) {
+  if (!buzzToast) return;
+  buzzToast.textContent = message;
+  buzzToast.classList.remove("hidden");
+  if (buzzToastTimer) window.clearTimeout(buzzToastTimer);
+  buzzToastTimer = window.setTimeout(() => {
+    buzzToast.classList.add("hidden");
+  }, 4500);
+}
+
+function updateBuzzUI() {
+  if (!buzzPanel || !buzzButton || !buzzStatus) return;
+  if (!state || !currentRoom || currentRole !== "player" || state.mode !== "pvp" || state.over) {
+    buzzPanel.classList.add("hidden");
+    return;
+  }
+  const myColor = getMyColor();
+  if (!myColor) {
+    buzzPanel.classList.add("hidden");
+    return;
+  }
+  const opponentColor = myColor === "red" ? "black" : "red";
+  const opponent = state.players[opponentColor];
+  if (!opponent?.id) {
+    buzzPanel.classList.add("hidden");
+    return;
+  }
+  const lastActivity = activityByColor[opponentColor];
+  if (!lastActivity) {
+    buzzPanel.classList.add("hidden");
+    return;
+  }
+  const now = Date.now();
+  const inactiveFor = now - lastActivity;
+  if (inactiveFor < INACTIVITY_MS) {
+    buzzPanel.classList.add("hidden");
+    return;
+  }
+  buzzPanel.classList.remove("hidden");
+  const inactiveSeconds = Math.floor(inactiveFor / 1000);
+  const cooldownRemaining = Math.max(0, BUZZ_COOLDOWN_MS - (now - lastBuzzSentAt));
+  const canBuzz = cooldownRemaining <= 0;
+  buzzButton.disabled = !canBuzz;
+  let statusText = `Rival inactivo: ${inactiveSeconds}s.`;
+  if (!canBuzz) {
+    statusText += ` Puedes avisar en ${Math.ceil(cooldownRemaining / 1000)}s.`;
+  }
+  buzzStatus.textContent = statusText;
+}
+
+function sendActivity(reason, throttleMs = 0) {
+  if (!socket || !socketReady || !currentRoom || currentRole !== "player") return;
+  const now = Date.now();
+  if (throttleMs > 0 && now - lastActivitySentAt < throttleMs) return;
+  socket.emit("activity", { code: currentRoom, reason });
+  lastActivitySentAt = now;
+}
+
 function hasActiveGame() {
   if (state && currentRoom) return true;
   if (state?.status === "playing") return true;
@@ -166,6 +236,11 @@ if (toggleLowerPanel) toggleLowerPanel.onclick = () => setPanelCollapsed(!panelC
 switchTab(activeTab);
 setPanelCollapsed(window.innerWidth < 760);
 updateFocusMode(false);
+document.addEventListener("pointerdown", () => sendActivity("pointerdown"));
+document.addEventListener("keydown", () => sendActivity("keydown"));
+document.addEventListener("touchstart", () => sendActivity("touchstart"), { passive: true });
+document.addEventListener("mousemove", () => sendActivity("mousemove", ACTIVITY_THROTTLE_MS));
+window.setInterval(updateBuzzUI, 1000);
 
 async function api(path, method = "GET", body) {
   const res = await fetch(path, {
@@ -292,6 +367,9 @@ function initSocket() {
     const wasInRoom = !!state;
     const prevState = state;
     state = { ...st, messages: st.messages || [] };
+    if (st.activity) {
+      activityByColor = { ...activityByColor, ...st.activity };
+    }
     if (!state.over) hideEndgameModal();
     resumeCode = null;
     currentRoom = st.code;
@@ -337,6 +415,7 @@ function initSocket() {
     renderBoard();
     renderChat();
     updateChatControls();
+    updateBuzzUI();
     setAuthUI(!!me);
   });
 
@@ -385,6 +464,33 @@ function initSocket() {
     state.messages.push(msg);
     state.messages = state.messages.slice(-100);
     renderChat();
+  });
+
+  socket.on("activity:update", ({ color, lastActivityAt }) => {
+    if (!color) return;
+    activityByColor = { ...activityByColor, [color]: lastActivityAt };
+    updateBuzzUI();
+  });
+
+  socket.on("buzz:received", () => {
+    const audio = getAudioManager();
+    if (audio?.playBuzz) audio.playBuzz();
+    showBuzzToast("⚡ Tu rival te está avisando. ¡Es tu turno!");
+  });
+
+  socket.on("buzz:sent", ({ ts }) => {
+    lastBuzzSentAt = ts || Date.now();
+    updateBuzzUI();
+  });
+
+  socket.on("buzz:denied", ({ reason }) => {
+    const reasonMsg = reason === "target_active"
+      ? "Tu rival está activo."
+      : reason === "cooldown"
+        ? "Espera unos segundos para volver a avisar."
+        : "No se pudo enviar el aviso.";
+    showBuzzToast(reasonMsg);
+    updateBuzzUI();
   });
 
   socket.on("drawOffer", ({ code }) => {
@@ -751,6 +857,7 @@ function submitMove(move) {
   if (!socket || !currentRoom || !socketReady) return;
   if (!move) return;
   socket.emit("move", { code: currentRoom, move });
+  sendActivity("move");
   selection = null;
   committedMove = null;
   hoverMove = null;
@@ -763,6 +870,7 @@ function blowPieceAt(coord) {
   if (!socket || !currentRoom || !socketReady) return;
   if (!coord) return;
   socket.emit("blowPiece", { code: currentRoom, target: coord });
+  sendActivity("blow");
   awaitingBlowSelection = false;
 }
 
@@ -874,6 +982,7 @@ function sendChatMessage() {
   if (!text) return;
   socket.emit("chatMessage", { code: currentRoom, text });
   chatInput.value = "";
+  sendActivity("chat");
 }
 
 function sendGlobalMessage() {
@@ -917,6 +1026,10 @@ function clearRoomState() {
   rolePill.textContent = "Observando";
   status.textContent = "Usa la pestaña Salas para crear o unirte a una partida.";
   if (matchMeta) matchMeta.textContent = "El tablero permanece visible incluso en espera.";
+  activityByColor = { red: null, black: null };
+  lastBuzzSentAt = 0;
+  if (buzzPanel) buzzPanel.classList.add("hidden");
+  if (buzzToast) buzzToast.classList.add("hidden");
   updateFocusMode(false);
 }
 
@@ -972,15 +1085,31 @@ globalChatInput.addEventListener("keydown", (e) => {
 
 chatSend.onclick = () => sendChatMessage();
 chatInput.addEventListener("keydown", (e) => {
+  sendActivity("chat");
   if (e.key === "Enter") {
     e.preventDefault();
     sendChatMessage();
   }
 });
 
+if (buzzButton) {
+  buzzButton.onclick = () => {
+    if (!socket || !currentRoom || !state) return;
+    const myColor = getMyColor();
+    if (!myColor) return;
+    const opponentColor = myColor === "red" ? "black" : "red";
+    const targetId = state.players[opponentColor]?.id;
+    if (!targetId) return;
+    playClickSound();
+    sendActivity("buzz");
+    socket.emit("buzz:request", { roomId: currentRoom, targetPlayerId: targetId });
+  };
+}
+
 btnRequestDraw.onclick = () => {
   if (!state || !currentRoom) return;
   playClickSound();
+  sendActivity("draw");
   socket.emit("requestDraw", { code: currentRoom });
   pendingTxt.textContent = "Solicitud enviada";
 };
@@ -988,6 +1117,7 @@ btnRequestDraw.onclick = () => {
 btnResign.onclick = () => {
   if (!state || !currentRoom) return;
   playClickSound();
+  sendActivity("resign");
   const ok = window.confirm("¿Seguro que deseas rendirte?");
   if (ok) socket.emit("resign", { code: currentRoom });
 };
@@ -995,6 +1125,7 @@ btnResign.onclick = () => {
 btnLeaveRoom.onclick = () => {
   if (!state || !currentRoom) return;
   playClickSound();
+  sendActivity("leave");
   const reason = state.mode === "ai" ? "ai_exit" : "leave";
   socket.emit("room:close", { code: currentRoom, reason });
 };
@@ -1002,6 +1133,7 @@ btnLeaveRoom.onclick = () => {
 btnFinishRoom.onclick = () => {
   if (!state || !currentRoom) return;
   playClickSound();
+  sendActivity("finish");
   const reason = "finished";
   socket.emit("room:close", { code: currentRoom, reason });
 };

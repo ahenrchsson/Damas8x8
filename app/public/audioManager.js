@@ -4,6 +4,7 @@
     move: "/assets/sounds/move.wav",
     eat: "/assets/sounds/eat.wav",
     blow: "/assets/sounds/blow.wav",
+    buzz: "/assets/sounds/buzz.wav",
     win: "/assets/sounds/win.wav",
     lose: "/assets/sounds/lose.wav"
   };
@@ -155,6 +156,7 @@
     playWin: () => play("win"),
     playLose: () => play("lose"),
     playClick: () => play("click"),
+    playBuzz: () => play("buzz"),
     setEnabled,
     setVolume,
     getVolume,

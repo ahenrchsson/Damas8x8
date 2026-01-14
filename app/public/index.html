@@ -16,7 +16,7 @@
         <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
         <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
       </div>
-      <div id="versionBadge" class="versionBadge">v1.2.0</div>
+      <div id="versionBadge" class="versionBadge">v1.2.1</div>
     </div>
   </div>
 
@@ -101,6 +101,13 @@
               <div class="statusBlock">
                 <div id="status" class="statusLine">Crea o únete a una sala para jugar.</div>
                 <div id="matchMeta" class="hint">El modo Game Focus mantiene el tablero al frente y las capturas son opcionales.</div>
+              </div>
+              <div id="buzzPanel" class="buzzPanel hidden">
+                <div class="buzzInfo">
+                  <div class="buzzTitle">Rival inactivo</div>
+                  <div id="buzzStatus" class="hint"></div>
+                </div>
+                <button id="buzzButton">Avisar al rival</button>
               </div>
             </div>
             <div class="tabPanel" id="roomChatPanel">
@@ -214,7 +221,9 @@
     </div>
   </div>
 
-  <div id="versionFloating" class="versionFloating">v1.2.0</div>
+  <div id="buzzToast" class="buzzToast hidden" role="status" aria-live="polite"></div>
+
+  <div id="versionFloating" class="versionFloating">v1.2.1</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>
