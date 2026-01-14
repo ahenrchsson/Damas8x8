@@ -4,6 +4,16 @@ const meBox = $("meBox");
 const authCard = $("authCard");
 const mainApp = $("mainApp");
 const authMsg = $("authMsg");
+const registrationStatus = $("registrationStatus");
+const recoveryPanel = $("recoveryPanel");
+const btnShowRecovery = $("btnShowRecovery");
+const btnRecover = $("btnRecover");
+const btnCancelRecovery = $("btnCancelRecovery");
+const recoveryUsername = $("recoveryUsername");
+const recoveryCode = $("recoveryCode");
+const recoveryPassword = $("recoveryPassword");
+const recoveryPasswordConfirm = $("recoveryPasswordConfirm");
+const recoveryNotice = $("recoveryNotice");
 const btnLogin = $("btnLogin");
 const btnRegister = $("btnRegister");
 const btnRanking = $("btnRanking");
@@ -80,6 +90,8 @@ const buzzPanel = $("buzzPanel");
 const buzzButton = $("buzzButton");
 const buzzStatus = $("buzzStatus");
 const buzzToast = $("buzzToast");
+const presenceList = $("presenceList");
+const presenceCount = $("presenceCount");
 let lastFocusMode = false;
 
 let me = null;
@@ -108,6 +120,12 @@ const INACTIVITY_MS = 30_000;
 const BUZZ_COOLDOWN_MS = 10_000;
 const ACTIVITY_THROTTLE_MS = 1_000;
 let lastActivitySentAt = 0;
+const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+let authConfig = {
+  allowRegistration: true,
+  username: { min: 3, max: 20 },
+  password: { min: 8 }
+};
 
 function getAudioManager() {
   return window.AudioManager || null;
@@ -253,10 +271,89 @@ async function api(path, method = "GET", body) {
   return data;
 }
 
+function clearRecoveryNotice() {
+  if (!recoveryNotice) return;
+  recoveryNotice.classList.add("hidden");
+  recoveryNotice.textContent = "";
+}
+
+function showRecoveryNotice(message, code) {
+  if (!recoveryNotice) return;
+  recoveryNotice.innerHTML = `${message} <strong>${code}</strong>`;
+  recoveryNotice.classList.remove("hidden");
+}
+
+function validateUsername(username) {
+  if (!username) return "Ingresa tu usuario.";
+  const min = authConfig.username?.min ?? 3;
+  const max = authConfig.username?.max ?? 20;
+  if (username.length < min || username.length > max) {
+    return `El usuario debe tener entre ${min} y ${max} caracteres.`;
+  }
+  if (/\s/.test(username)) return "El usuario no debe tener espacios.";
+  if (!USERNAME_REGEX.test(username)) {
+    return "El usuario solo puede incluir letras, números, guion y guion bajo.";
+  }
+  return null;
+}
+
+function validatePasswordStrength(password) {
+  const min = authConfig.password?.min ?? 8;
+  if (!password || password.length < min) {
+    return `La contraseña debe tener al menos ${min} caracteres.`;
+  }
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\\d/.test(password)) {
+    return "La contraseña debe incluir mayúsculas, minúsculas y números.";
+  }
+  return null;
+}
+
+function authErrorMessage(error, context) {
+  switch (error) {
+    case "username_taken":
+      return "Ese usuario ya existe. Prueba otro.";
+    case "bad_credentials":
+      return "Usuario o contraseña incorrectos.";
+    case "registration_disabled":
+      return "El registro está deshabilitado. Contacta al administrador.";
+    case "registration_limited":
+      return "Se alcanzó el límite de registros por IP. Intenta más tarde.";
+    case "recovery_failed":
+      return "No se pudo verificar el código de recuperación.";
+    case "bad_input":
+      return context === "recover"
+        ? "Revisa el usuario, el código y la nueva contraseña."
+        : "Revisa los campos ingresados.";
+    default:
+      return null;
+  }
+}
+
+async function loadAuthConfig() {
+  try {
+    const data = await api("/api/auth/config");
+    if (data?.username) authConfig.username = data.username;
+    if (data?.password) authConfig.password = data.password;
+    authConfig.allowRegistration = data?.allowRegistration ?? true;
+  } catch (_) {
+    authConfig = authConfig || { allowRegistration: true, username: { min: 3, max: 20 }, password: { min: 8 } };
+  }
+  if (btnRegister) btnRegister.disabled = !authConfig.allowRegistration;
+  if (registrationStatus) {
+    registrationStatus.textContent = authConfig.allowRegistration
+      ? "Registro habilitado."
+      : "Registro deshabilitado por el administrador.";
+  }
+}
+
 function setAuthUI(logged) {
   const canPlay = logged && socketReady;
   authCard.classList.toggle("hidden", logged);
   mainApp.classList.toggle("hidden", !logged);
+  if (logged) {
+    recoveryPanel?.classList.add("hidden");
+    clearRecoveryNotice();
+  }
   btnNewPvP.disabled = !canPlay;
   btnNewAI.disabled = !canPlay;
   aiDifficulty.disabled = !canPlay;
@@ -332,6 +429,10 @@ function initSocket() {
   socket.on("lobbyRooms", (rooms) => {
     lobbyRooms = rooms;
     renderLobby();
+  });
+
+  socket.on("presence:update", ({ users }) => {
+    renderPresence(users || []);
   });
 
   socket.on("globalChatHistory", (msgs) => {
@@ -548,6 +649,32 @@ function renderLobby() {
     roomsTableBody.appendChild(tr);
   });
   lobbyStatus.textContent = `Salas: ${lobbyRooms.length}`;
+}
+
+function formatConnectedSince(ts) {
+  if (!ts) return "—";
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "Ahora";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  return `${hours} h`;
+}
+
+function renderPresence(users = []) {
+  if (!presenceList) return;
+  presenceList.innerHTML = "";
+  users.forEach((user) => {
+    const tr = document.createElement("tr");
+    const badge = user.connections > 1 ? ` <span class="presenceBadge">x${user.connections}</span>` : "";
+    tr.innerHTML = `
+      <td>${user.username || "Usuario"}${badge}</td>
+      <td>${user.status || "En lobby"}</td>
+      <td>${formatConnectedSince(user.connectedAt)}</td>
+    `;
+    presenceList.appendChild(tr);
+  });
+  if (presenceCount) presenceCount.textContent = `${users.length}`;
 }
 
 function renderGlobalChat() {
@@ -1033,14 +1160,83 @@ function clearRoomState() {
   updateFocusMode(false);
 }
 
+if (btnShowRecovery) {
+  btnShowRecovery.onclick = () => {
+    recoveryPanel?.classList.toggle("hidden");
+    authMsg.textContent = "";
+  };
+}
+
+if (btnCancelRecovery) {
+  btnCancelRecovery.onclick = () => {
+    recoveryPanel?.classList.add("hidden");
+    authMsg.textContent = "";
+  };
+}
+
+if (btnRecover) {
+  btnRecover.onclick = async () => {
+    try {
+      const username = recoveryUsername?.value.trim() || "";
+      const code = recoveryCode?.value.trim() || "";
+      const password = recoveryPassword?.value || "";
+      const confirm = recoveryPasswordConfirm?.value || "";
+      const usernameError = validateUsername(username);
+      if (usernameError) {
+        authMsg.textContent = usernameError;
+        return;
+      }
+      if (!code) {
+        authMsg.textContent = "Ingresa el código de recuperación.";
+        return;
+      }
+      const passwordError = validatePasswordStrength(password);
+      if (passwordError) {
+        authMsg.textContent = passwordError;
+        return;
+      }
+      if (password !== confirm) {
+        authMsg.textContent = "Las contraseñas no coinciden.";
+        return;
+      }
+      const data = await api("/api/auth/recover", "POST", {
+        username,
+        recoveryCode: code,
+        newPassword: password
+      });
+      if (data?.recoveryCode) {
+        showRecoveryNotice("Nuevo código de recuperación:", data.recoveryCode);
+        window.alert(`Nuevo código de recuperación:\n${data.recoveryCode}`);
+      }
+      if (recoveryPassword) recoveryPassword.value = "";
+      if (recoveryPasswordConfirm) recoveryPasswordConfirm.value = "";
+      if (recoveryCode) recoveryCode.value = "";
+      if (recoveryPanel) recoveryPanel.classList.add("hidden");
+      authMsg.textContent = "Contraseña actualizada. Ya puedes iniciar sesión.";
+    } catch (e) {
+      authMsg.textContent = authErrorMessage(e?.error, "recover") || "Error";
+    }
+  };
+}
+
 btnLogin.onclick = async () => {
   try {
     const username = $("username").value.trim();
     const password = $("password").value;
+    clearRecoveryNotice();
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      authMsg.textContent = usernameError;
+      return;
+    }
+    if (!password) {
+      authMsg.textContent = "Ingresa tu contraseña.";
+      return;
+    }
     await api("/api/auth/login", "POST", { username, password });
     await refreshMe();
   } catch (e) {
-    authMsg.textContent = e?.error || "Error";
+    authMsg.textContent = authErrorMessage(e?.error, "login") || "Error";
   }
 };
 
@@ -1048,10 +1244,29 @@ btnRegister.onclick = async () => {
   try {
     const username = $("username").value.trim();
     const password = $("password").value;
-    await api("/api/auth/register", "POST", { username, password });
+    clearRecoveryNotice();
+    if (!authConfig.allowRegistration) {
+      authMsg.textContent = "El registro está deshabilitado por el administrador.";
+      return;
+    }
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      authMsg.textContent = usernameError;
+      return;
+    }
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      authMsg.textContent = passwordError;
+      return;
+    }
+    const data = await api("/api/auth/register", "POST", { username, password });
+    if (data?.recoveryCode) {
+      showRecoveryNotice("Guarda este código de recuperación:", data.recoveryCode);
+      window.alert(`Guarda este código de recuperación:\n${data.recoveryCode}`);
+    }
     await refreshMe();
   } catch (e) {
-    authMsg.textContent = e?.error || "Error";
+    authMsg.textContent = authErrorMessage(e?.error, "register") || "Error";
   }
 };
 
@@ -1266,6 +1481,7 @@ window.addEventListener("resize", () => {
 });
 
 (async function init() {
+  await loadAuthConfig();
   await refreshMe();
   await loadVersion();
   initSoundControls();
