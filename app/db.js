@@ -10,12 +10,8 @@ async function migrate(pool) {
       id            SERIAL PRIMARY KEY,
       username      TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      recovery_hash TEXT,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
-    ALTER TABLE app_users
-      ADD COLUMN IF NOT EXISTS recovery_hash TEXT;
 
     CREATE TABLE IF NOT EXISTS ratings (
       user_id     INTEGER PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
