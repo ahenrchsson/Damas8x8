@@ -165,6 +165,9 @@ button.danger { background: #e04f5f; }
 
 .mobileOnly { display:none; }
 .versionFloating { position: fixed; right: 12px; bottom: 12px; background:#0f1115; border:1px solid #2a3242; border-radius: 12px; padding: 8px 12px; font-size: 12px; color:#e7e7e7; opacity:.9; z-index: 6; }
+.buzzPanel { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid #2a3242; background: #1a2130; }
+.buzzTitle { font-weight: 700; color: #f8d06b; }
+.buzzToast { position: fixed; top: 18px; right: 18px; background: #1d2535; border: 1px solid #f8d06b; color: #f8f4e6; border-radius: 12px; padding: 12px 16px; box-shadow: 0 12px 24px rgba(0,0,0,.35); z-index: 15; max-width: 320px; }
 
 body.inRoom .lowerPanel { border-color:#2a3242; box-shadow: 0 12px 20px rgba(0,0,0,.35); }
 body.inRoom #focusPill { opacity:1; }
