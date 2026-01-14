@@ -37,16 +37,20 @@ const {
   pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.2.1";
+let VERSION = "v1.2.2";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.2.1";
+  VERSION = "v1.2.2";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
 const TRUST_PROXY = (process.env.TRUST_PROXY || "false").toLowerCase() === "true";
+const ALLOW_REGISTRATION = (process.env.ALLOW_REGISTRATION || "true").toLowerCase() === "true";
+const REGISTRATION_LIMIT_PER_IP = Number.parseInt(process.env.REGISTRATION_LIMIT_PER_IP || "3", 10);
+const RECOVERY_RATE_LIMIT = Number.parseInt(process.env.RECOVERY_RATE_LIMIT || "5", 10);
+const RECOVERY_CODE_LENGTH = Number.parseInt(process.env.RECOVERY_CODE_LENGTH || "14", 10);
 
 console.log(`Starting Damas8x8 ${VERSION}`);
 
@@ -55,6 +59,8 @@ if (!DATABASE_URL) throw new Error("DATABASE_URL faltante");
 const pool = makePool(DATABASE_URL);
 const INACTIVITY_MS = 30_000;
 const BUZZ_COOLDOWN_MS = 10_000;
+const REGISTRATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const registrationByIp = new Map();
 
 function eloUpdate(rA, rB, scoreA, k = 32) {
   const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
@@ -64,6 +70,38 @@ function eloUpdate(rA, rB, scoreA, k = 32) {
     newA: Math.round(rA + k * (scoreA - expA)),
     newB: Math.round(rB + k * (scoreB - expB))
   };
+}
+
+function normalizeClientIp(req) {
+  return req.ip || req.connection?.remoteAddress || "unknown";
+}
+
+function getRegistrationEntry(ip) {
+  const now = Date.now();
+  const entry = registrationByIp.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    return { count: 0, resetAt: now + REGISTRATION_WINDOW_MS };
+  }
+  return entry;
+}
+
+function isRegistrationLimited(ip) {
+  if (!Number.isFinite(REGISTRATION_LIMIT_PER_IP) || REGISTRATION_LIMIT_PER_IP <= 0) {
+    return { limited: false };
+  }
+  const entry = getRegistrationEntry(ip);
+  if (entry.count >= REGISTRATION_LIMIT_PER_IP) {
+    return { limited: true, retryAt: entry.resetAt };
+  }
+  return { limited: false, entry };
+}
+
+function recordRegistration(ip) {
+  if (!Number.isFinite(REGISTRATION_LIMIT_PER_IP) || REGISTRATION_LIMIT_PER_IP <= 0) {
+    return;
+  }
+  const entry = getRegistrationEntry(ip);
+  registrationByIp.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
 }
 
 function flipColor(color) {
@@ -118,9 +156,26 @@ async function main() {
   app.use(sessionMiddleware);
 
   // ---------- Auth ----------
-  const credsSchema = z.object({
-    username: z.string().min(3).max(24).regex(/^[a-zA-Z0-9_]+$/),
-    password: z.string().min(6).max(200)
+  const USERNAME_MIN = 3;
+  const USERNAME_MAX = 20;
+  const PASSWORD_MIN = 8;
+  const passwordSchema = z.string().min(PASSWORD_MIN).max(200).refine(
+    (value) => /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value),
+    { message: "weak_password" }
+  );
+  const usernameSchema = z.string().min(USERNAME_MIN).max(USERNAME_MAX).regex(/^[a-zA-Z0-9_-]+$/);
+  const loginSchema = z.object({
+    username: usernameSchema,
+    password: z.string().min(1).max(200)
+  });
+  const registerSchema = z.object({
+    username: usernameSchema,
+    password: passwordSchema
+  });
+  const recoverSchema = z.object({
+    username: usernameSchema,
+    recoveryCode: z.string().min(6).max(64),
+    newPassword: passwordSchema
   });
 
   function requireAuth(req, res, next) {
@@ -129,31 +184,42 @@ async function main() {
   }
 
   app.post("/api/auth/register", async (req, res) => {
-    const parsed = credsSchema.safeParse(req.body);
+    if (!ALLOW_REGISTRATION) {
+      return res.status(403).json({ error: "registration_disabled" });
+    }
+    const ip = normalizeClientIp(req);
+    const limitCheck = isRegistrationLimited(ip);
+    if (limitCheck.limited) {
+      return res.status(429).json({ error: "registration_limited", retryAt: limitCheck.retryAt });
+    }
+    const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "bad_input" });
 
     const { username, password } = parsed.data;
     const hash = await bcrypt.hash(password, 10);
+    const recoveryCode = nanoid(RECOVERY_CODE_LENGTH);
+    const recoveryHash = await bcrypt.hash(recoveryCode, 10);
 
     try {
       const { rows } = await pool.query(
-        `INSERT INTO app_users (username, password_hash)
-         VALUES ($1,$2)
+        `INSERT INTO app_users (username, password_hash, recovery_hash)
+         VALUES ($1,$2,$3)
          RETURNING id, username`,
-        [username, hash]
+        [username, hash, recoveryHash]
       );
       const user = rows[0];
       await ensureUserRating(pool, user.id);
       req.session.userId = user.id;
       req.session.username = user.username;
-      return res.json({ ok: true, user: { id: user.id, username: user.username } });
+      recordRegistration(ip);
+      return res.json({ ok: true, user: { id: user.id, username: user.username }, recoveryCode });
     } catch (e) {
       return res.status(409).json({ error: "username_taken" });
     }
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    const parsed = credsSchema.safeParse(req.body);
+    const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "bad_input" });
 
     const { username, password } = parsed.data;
@@ -171,8 +237,47 @@ async function main() {
     return res.json({ ok: true, user: { id: rows[0].id, username: rows[0].username } });
   });
 
+  const recoveryLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: RECOVERY_RATE_LIMIT
+  });
+
+  app.post("/api/auth/recover", recoveryLimiter, async (req, res) => {
+    const parsed = recoverSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "bad_input" });
+
+    const { username, recoveryCode, newPassword } = parsed.data;
+    const { rows } = await pool.query(
+      `SELECT id, recovery_hash FROM app_users WHERE username=$1`,
+      [username]
+    );
+    if (!rows[0] || !rows[0].recovery_hash) {
+      return res.status(400).json({ error: "recovery_failed" });
+    }
+    const matches = await bcrypt.compare(recoveryCode, rows[0].recovery_hash);
+    if (!matches) {
+      return res.status(400).json({ error: "recovery_failed" });
+    }
+    const nextPasswordHash = await bcrypt.hash(newPassword, 10);
+    const nextRecoveryCode = nanoid(RECOVERY_CODE_LENGTH);
+    const nextRecoveryHash = await bcrypt.hash(nextRecoveryCode, 10);
+    await pool.query(
+      `UPDATE app_users SET password_hash=$1, recovery_hash=$2 WHERE id=$3`,
+      [nextPasswordHash, nextRecoveryHash, rows[0].id]
+    );
+    return res.json({ ok: true, recoveryCode: nextRecoveryCode });
+  });
+
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy(() => res.json({ ok: true }));
+  });
+
+  app.get("/api/auth/config", (_req, res) => {
+    res.json({
+      allowRegistration: ALLOW_REGISTRATION,
+      username: { min: USERNAME_MIN, max: USERNAME_MAX, pattern: "^[a-zA-Z0-9_-]+$" },
+      password: { min: PASSWORD_MIN, requiresUpper: true, requiresLower: true, requiresNumber: true }
+    });
   });
 
   app.get("/api/me", async (req, res) => {
@@ -272,6 +377,79 @@ async function main() {
   const lobbyRoomName = "lobby";
   const MAX_ROOM_MSGS = 100;
   const MAX_GLOBAL_MSGS = 200;
+  const presenceByUser = new Map(); // userId -> { username, connectedAt, sockets: Set, statusBySocket: Map }
+  const presenceBySocket = new Map(); // socketId -> { userId, status }
+  const statusPriority = ["Jugando", "En sala", "Observando", "En lobby"];
+
+  function aggregatePresenceStatus(entry) {
+    const statuses = Array.from(entry.statusBySocket.values());
+    if (statuses.length === 0) return "En lobby";
+    statuses.sort((a, b) => statusPriority.indexOf(a) - statusPriority.indexOf(b));
+    return statuses[0] || "En lobby";
+  }
+
+  function getPresenceList() {
+    return Array.from(presenceByUser.entries())
+      .map(([userId, entry]) => ({
+        userId,
+        username: entry.username,
+        status: aggregatePresenceStatus(entry),
+        connectedAt: entry.connectedAt,
+        connections: entry.sockets.size
+      }))
+      .sort((a, b) => a.username.localeCompare(b.username));
+  }
+
+  function broadcastPresence() {
+    io.emit("presence:update", { users: getPresenceList() });
+  }
+
+  function setPresenceStatus(userId, username, socketId, status) {
+    if (!userId || !socketId) return;
+    const entry = presenceByUser.get(userId) || {
+      username,
+      connectedAt: Date.now(),
+      sockets: new Set(),
+      statusBySocket: new Map()
+    };
+    entry.username = username || entry.username;
+    entry.sockets.add(socketId);
+    entry.statusBySocket.set(socketId, status);
+    presenceByUser.set(userId, entry);
+    presenceBySocket.set(socketId, { userId, status });
+    broadcastPresence();
+  }
+
+  function removePresenceSocket(socketId) {
+    const data = presenceBySocket.get(socketId);
+    if (!data) return;
+    const entry = presenceByUser.get(data.userId);
+    if (entry) {
+      entry.sockets.delete(socketId);
+      entry.statusBySocket.delete(socketId);
+      if (entry.sockets.size === 0) {
+        presenceByUser.delete(data.userId);
+      }
+    }
+    presenceBySocket.delete(socketId);
+    broadcastPresence();
+  }
+
+  function setUserPresence(userId, status) {
+    const entry = presenceByUser.get(userId);
+    if (!entry) return;
+    entry.statusBySocket.forEach((_val, socketId) => {
+      entry.statusBySocket.set(socketId, status);
+      const socketData = presenceBySocket.get(socketId);
+      if (socketData) socketData.status = status;
+    });
+    broadcastPresence();
+  }
+
+  function roomPresenceStatus(room, role) {
+    if (role === "observer") return "Observando";
+    return roomStatus(room) === "in_game" ? "Jugando" : "En sala";
+  }
 
   function computeRoomState(room) {
     const generated = computeMoves(room.board, room.turn);
@@ -341,6 +519,19 @@ async function main() {
     if (room.over) return "finished";
     if (room.players.red && room.players.black) return "in_game";
     return "waiting";
+  }
+
+  function updatePresenceForRoomPlayers(room) {
+    ["red", "black"].forEach((color) => {
+      const player = room.players[color];
+      if (!player?.id) return;
+      const status = roomPresenceStatus(room, "player");
+      if (player.sid) {
+        setPresenceStatus(player.id, player.username, player.sid, status);
+      } else {
+        setUserPresence(player.id, status);
+      }
+    });
   }
 
   function publicStateFor(room) {
@@ -515,10 +706,12 @@ async function main() {
     if (redId) {
       userRoomMap.delete(redId);
       await clearActiveRoom(pool, redId);
+      setUserPresence(redId, "En lobby");
     }
     if (blackId && !room.ai) {
       userRoomMap.delete(blackId);
       await clearActiveRoom(pool, blackId);
+      setUserPresence(blackId, "En lobby");
     }
 
     rooms.delete(room.code);
@@ -598,6 +791,7 @@ async function main() {
     if (sess?.userId) {
       socket.data.userId = sess.userId;
       socket.data.username = sess.username;
+      setPresenceStatus(sess.userId, sess.username, socket.id, "En lobby");
     }
 
     const announceResume = () => {
@@ -615,6 +809,7 @@ async function main() {
     socket.join(lobbyRoomName);
     socket.emit("lobbyRooms", lobbyList());
     socket.emit("globalChatHistory", globalMessages);
+    socket.emit("presence:update", { users: getPresenceList() });
     announceResume();
 
     function ensureAuth() {
@@ -640,6 +835,7 @@ async function main() {
     socket.on("setUser", async ({ userId, username }) => {
       socket.data.userId = userId;
       socket.data.username = username;
+      setPresenceStatus(userId, username, socket.id, "En lobby");
       socket.emit("userOk");
       socket.join(lobbyRoomName);
       socket.emit("lobbyRooms", lobbyList());
@@ -690,6 +886,7 @@ async function main() {
       await setActiveRoom(pool, hostUser.id, code, room.mode);
       await persistColorPreference(hostUser.id, room.mode, hostColor);
       setPlayerActivity(room, hostColor, hostUser.id);
+      updatePresenceForRoomPlayers(room);
       emitLobby();
       socket.emit("roomCreated", { code });
       sendState(room);
@@ -729,6 +926,7 @@ async function main() {
       await setActiveRoom(pool, socket.data.userId, roomCode, room.mode);
       await persistColorPreference(socket.data.userId, "pvp", joinColor);
       setPlayerActivity(room, joinColor, socket.data.userId);
+      updatePresenceForRoomPlayers(room);
       emitLobby();
       sendState(room);
     });
@@ -740,6 +938,9 @@ async function main() {
       if (room.ai) return socket.emit("err", { error: "room_not_observable", message: "Las salas contra IA no aceptan observadores." });
       room.observers.set(socket.id, { username: socket.data.username || "Observador" });
       socket.join(roomCode);
+      if (socket.data.userId) {
+        setPresenceStatus(socket.data.userId, socket.data.username, socket.id, roomPresenceStatus(room, "observer"));
+      }
       emitLobby();
       sendState(room);
     });
@@ -752,6 +953,9 @@ async function main() {
       if (room.observers.has(socket.id)) {
         room.observers.delete(socket.id);
         emitLobby();
+      }
+      if (socket.data.userId) {
+        setPresenceStatus(socket.data.userId, socket.data.username, socket.id, "En lobby");
       }
       sendState(room);
     });
@@ -769,6 +973,7 @@ async function main() {
       if (room.players[color]) room.players[color].sid = socket.id;
       socket.join(code);
       setPlayerActivity(room, color, socket.data.userId);
+      updatePresenceForRoomPlayers(room);
       sendState(room);
     });
 
@@ -1092,6 +1297,7 @@ async function main() {
           room.observers.delete(socket.id);
         }
       }
+      removePresenceSocket(socket.id);
       emitLobby();
     });
   });

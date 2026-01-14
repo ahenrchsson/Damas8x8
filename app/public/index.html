@@ -16,21 +16,59 @@
         <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
         <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
       </div>
-      <div id="versionBadge" class="versionBadge">v1.2.1</div>
+      <div id="versionBadge" class="versionBadge">v1.2.2</div>
     </div>
   </div>
 
   <div class="wrap">
     <div class="card" id="authCard">
       <h2>Entrar / Registrarse</h2>
-      <div class="row">
-        <input id="username" placeholder="usuario (a-zA-Z0-9_)" autocomplete="username"/>
-        <input id="password" placeholder="password" type="password" autocomplete="current-password"/>
+      <div class="authRules">
+        <div class="authRuleBlock">
+          <div class="authRuleTitle">Usuario</div>
+          <ul>
+            <li>Longitud entre 3 y 20 caracteres.</li>
+            <li>Solo letras, números, guion (-) y guion bajo (_).</li>
+            <li>Sin espacios.</li>
+          </ul>
+        </div>
+        <div class="authRuleBlock">
+          <div class="authRuleTitle">Contraseña</div>
+          <ul>
+            <li>Mínimo 8 caracteres.</li>
+            <li>Incluye mayúsculas, minúsculas y números.</li>
+          </ul>
+        </div>
+        <div class="authExamples">
+          <span><strong>Ejemplos:</strong> usuario_ejemplo • MiClaveSegura123</span>
+        </div>
       </div>
+      <div class="hint" id="registrationStatus"></div>
       <div class="row">
+        <input id="username" placeholder="usuario (a-zA-Z0-9_-)" autocomplete="username"/>
+        <input id="password" placeholder="contraseña" type="password" autocomplete="current-password"/>
+      </div>
+      <div class="row authActions">
         <button id="btnLogin">Login</button>
         <button id="btnRegister">Registro</button>
+        <button id="btnShowRecovery" class="ghost" type="button">Olvidé mi contraseña</button>
       </div>
+      <div id="recoveryPanel" class="authRecovery hidden">
+        <div class="authRuleTitle">Recuperar contraseña</div>
+        <div class="row">
+          <input id="recoveryUsername" placeholder="usuario" autocomplete="username"/>
+          <input id="recoveryCode" placeholder="código de recuperación" autocomplete="one-time-code"/>
+        </div>
+        <div class="row">
+          <input id="recoveryPassword" placeholder="nueva contraseña" type="password" autocomplete="new-password"/>
+          <input id="recoveryPasswordConfirm" placeholder="confirmar contraseña" type="password" autocomplete="new-password"/>
+        </div>
+        <div class="row">
+          <button id="btnRecover">Actualizar contraseña</button>
+          <button id="btnCancelRecovery" class="ghost" type="button">Cancelar</button>
+        </div>
+      </div>
+      <div id="recoveryNotice" class="notice hidden"></div>
       <div class="hint" id="authMsg"></div>
     </div>
 
@@ -138,6 +176,24 @@
                 <h3>Salas</h3>
                 <span id="lobbyStatus" class="pill">Tiempo real</span>
               </div>
+              <div class="card presenceCard">
+                <div class="cardHeader">
+                  <h3>Usuarios conectados</h3>
+                  <span id="presenceCount" class="pill ghost">0</span>
+                </div>
+                <div class="tableWrap">
+                  <table class="tbl" id="presenceTable">
+                    <thead>
+                      <tr>
+                        <th>Usuario</th>
+                        <th>Estado</th>
+                        <th>Conectado</th>
+                      </tr>
+                    </thead>
+                    <tbody id="presenceList"></tbody>
+                  </table>
+                </div>
+              </div>
               <div class="row wrapRow">
                 <input id="roomName" placeholder="Nombre opcional de sala"/>
                 <button id="btnNewPvP" disabled>Crear sala PvP</button>
@@ -223,7 +279,7 @@
 
   <div id="buzzToast" class="buzzToast hidden" role="status" aria-live="polite"></div>
 
-  <div id="versionFloating" class="versionFloating">v1.2.1</div>
+  <div id="versionFloating" class="versionFloating">v1.2.2</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>
