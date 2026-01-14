@@ -51,6 +51,16 @@ button.ghost { background: transparent; border:1px solid #2a3242; }
 button.danger { background: #e04f5f; }
 .pill.success { background:#12311f; border-color:#1f5a33; color:#9ef0c3; }
 .hint { opacity:.8; font-size: 13px; margin-top: 6px; min-height: 18px; }
+.notice { background:#10141d; border:1px solid #2a3242; border-radius: 12px; padding: 10px 12px; font-size: 13px; margin-top: 10px; color:#cfe3ff; }
+.notice strong { color:#fff; }
+.authRules { background:#10141d; border:1px solid #232a36; border-radius: 12px; padding: 10px 12px; display:grid; gap: 10px; margin-top: 10px; }
+.authRuleBlock ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; opacity: .85; }
+.authRuleTitle { font-weight: 700; }
+.authExamples { font-size: 13px; opacity: .85; }
+.authActions { align-items: center; }
+.authRecovery { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #2a3242; }
+.presenceCard { margin-bottom: 10px; }
+.presenceBadge { display:inline-flex; align-items:center; padding: 2px 6px; border-radius: 999px; background:#24314b; font-size: 11px; margin-left: 6px; }
 .pill { background:#1f2634; border:1px solid #2a3242; padding: 6px 10px; border-radius: 999px; font-size: 12px; opacity:.9; }
 .pill.ghost { background: transparent; }
 .strong { font-weight: 700; }
