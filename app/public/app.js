@@ -69,6 +69,7 @@ const btnConfirmMove = $("btnConfirmMove");
 const btnCancelMove = $("btnCancelMove");
 const versionBadge = $("versionBadge");
 const versionFloating = $("versionFloating");
+const themeSelect = $("themeSelect");
 const soundToggle = $("soundToggle");
 const soundVolume = $("soundVolume");
 const matchMeta = $("matchMeta");
@@ -120,6 +121,9 @@ const INACTIVITY_MS = 30_000;
 const BUZZ_COOLDOWN_MS = 10_000;
 const ACTIVITY_THROTTLE_MS = 1_000;
 let lastActivitySentAt = 0;
+const THEME_KEY = "uiTheme";
+const THEMES = ["technology", "classic", "wooden"];
+const THEME_CLASSES = THEMES.map((theme) => `theme-${theme}`);
 const DEFAULT_USERNAME_REGEX_SOURCE = "^[a-zA-Z0-9_-]+$";
 const DEFAULT_PASSWORD_REGEX_SOURCE = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)[A-Za-z\\d]{8,}$";
 const DEFAULT_PASSWORD_MESSAGE =
@@ -170,6 +174,41 @@ function initSoundControls() {
       const nextValue = Number(soundVolume.value);
       audio.setVolume?.(Number.isNaN(nextValue) ? 0.5 : nextValue / 10);
       updateSoundUI();
+    });
+  }
+}
+
+function normalizeTheme(value) {
+  if (!value) return "technology";
+  const normalized = String(value).toLowerCase();
+  return THEMES.includes(normalized) ? normalized : "technology";
+}
+
+function applyTheme(value, persist = true) {
+  const normalized = normalizeTheme(value);
+  document.body.classList.remove(...THEME_CLASSES);
+  document.body.classList.add(`theme-${normalized}`);
+  if (themeSelect) themeSelect.value = normalized;
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_KEY, normalized);
+    } catch {
+      // ignore storage failures
+    }
+  }
+}
+
+function initThemeSelector() {
+  let storedTheme = null;
+  try {
+    storedTheme = localStorage.getItem(THEME_KEY);
+  } catch {
+    storedTheme = null;
+  }
+  applyTheme(storedTheme || "technology", false);
+  if (themeSelect) {
+    themeSelect.addEventListener("change", (event) => {
+      applyTheme(event.target.value);
     });
   }
 }
@@ -1501,6 +1540,7 @@ window.addEventListener("resize", () => {
   await loadAuthConfig();
   await refreshMe();
   await loadVersion();
+  initThemeSelector();
   initSoundControls();
   if (me) {
     await refreshLeaderboard();

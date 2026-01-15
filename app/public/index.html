@@ -6,7 +6,7 @@
   <title>Damas - Lobby PvP</title>
   <link rel="stylesheet" href="/style.css"/>
 </head>
-<body>
+<body class="theme-technology">
   <div class="topbar">
     <div class="brand">♟️ Damas Multijugador</div>
     <div class="top-actions">
@@ -16,7 +16,7 @@
         <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
         <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
       </div>
-      <div id="versionBadge" class="versionBadge">v1.2.3</div>
+      <div id="versionBadge" class="versionBadge">v1.3.0</div>
     </div>
   </div>
 
@@ -86,6 +86,14 @@
             <div class="players">
               <div class="player" id="playerRed">🔴 Rojo: —</div>
               <div class="player" id="playerBlack">⚫ Negro: —</div>
+            </div>
+            <div class="row themeRow">
+              <label for="themeSelect">Tema visual</label>
+              <select id="themeSelect">
+                <option value="technology">Technology</option>
+                <option value="classic">Classic</option>
+                <option value="wooden">Wooden</option>
+              </select>
             </div>
             <div class="infoLine" id="turnTxt">Turno: —</div>
             <div class="infoLine" id="forcedTxt">Capturas recomendadas: —</div>
@@ -281,7 +289,7 @@
 
   <div id="buzzToast" class="buzzToast hidden" role="status" aria-live="polite"></div>
 
-  <div id="versionFloating" class="versionFloating">v1.2.3</div>
+  <div id="versionFloating" class="versionFloating">v1.3.0</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>
