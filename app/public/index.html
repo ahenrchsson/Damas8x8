@@ -16,7 +16,7 @@
         <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
         <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
       </div>
-      <div id="versionBadge" class="versionBadge">v1.2.2</div>
+      <div id="versionBadge" class="versionBadge">v1.2.3</div>
     </div>
   </div>
 
@@ -27,8 +27,8 @@
         <div class="authRuleBlock">
           <div class="authRuleTitle">Usuario</div>
           <ul>
-            <li>Longitud entre 3 y 20 caracteres.</li>
-            <li>Solo letras, números, guion (-) y guion bajo (_).</li>
+            <li>3–20 caracteres.</li>
+            <li>Letras, números, guion bajo (_) y guion medio (-).</li>
             <li>Sin espacios.</li>
           </ul>
         </div>
@@ -36,11 +36,13 @@
           <div class="authRuleTitle">Contraseña</div>
           <ul>
             <li>Mínimo 8 caracteres.</li>
-            <li>Incluye mayúsculas, minúsculas y números.</li>
+            <li>1 mayúscula.</li>
+            <li>1 minúscula.</li>
+            <li>1 número.</li>
           </ul>
         </div>
         <div class="authExamples">
-          <span><strong>Ejemplos:</strong> usuario_ejemplo • MiClaveSegura123</span>
+          <span><strong>Ejemplos:</strong> Usuario: usuario_ejemplo • Contraseña: Andres0424</span>
         </div>
       </div>
       <div class="hint" id="registrationStatus"></div>
@@ -279,7 +281,7 @@
 
   <div id="buzzToast" class="buzzToast hidden" role="status" aria-live="polite"></div>
 
-  <div id="versionFloating" class="versionFloating">v1.2.2</div>
+  <div id="versionFloating" class="versionFloating">v1.2.3</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>

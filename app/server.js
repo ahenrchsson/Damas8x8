@@ -12,6 +12,11 @@ const bcrypt = require("bcryptjs");
 const { z } = require("zod");
 const { nanoid } = require("nanoid");
 const { Server } = require("socket.io");
+const {
+  PASSWORD_REGEX_SOURCE,
+  PASSWORD_RULE_MESSAGE,
+  USERNAME_REGEX_SOURCE
+} = require("./authRules");
 
 const {
   makePool,
@@ -37,12 +42,12 @@ const {
   pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.2.2";
+let VERSION = "v1.2.3";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.2.2";
+  VERSION = "v1.2.3";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -159,11 +164,13 @@ async function main() {
   const USERNAME_MIN = 3;
   const USERNAME_MAX = 20;
   const PASSWORD_MIN = 8;
-  const passwordSchema = z.string().min(PASSWORD_MIN).max(200).refine(
-    (value) => /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value),
-    { message: "weak_password" }
-  );
-  const usernameSchema = z.string().min(USERNAME_MIN).max(USERNAME_MAX).regex(/^[a-zA-Z0-9_-]+$/);
+  const PASSWORD_REGEX = new RegExp(PASSWORD_REGEX_SOURCE);
+  const USERNAME_REGEX = new RegExp(USERNAME_REGEX_SOURCE);
+  const passwordSchema = z
+    .string()
+    .max(200)
+    .regex(PASSWORD_REGEX, { message: PASSWORD_RULE_MESSAGE });
+  const usernameSchema = z.string().min(USERNAME_MIN).max(USERNAME_MAX).regex(USERNAME_REGEX);
   const loginSchema = z.object({
     username: usernameSchema,
     password: z.string().min(1).max(200)
@@ -193,7 +200,12 @@ async function main() {
       return res.status(429).json({ error: "registration_limited", retryAt: limitCheck.retryAt });
     }
     const parsed = registerSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "bad_input" });
+    if (!parsed.success) {
+      const hasWeakPassword = parsed.error?.issues?.some(
+        (issue) => issue.message === PASSWORD_RULE_MESSAGE
+      );
+      return res.status(400).json({ error: hasWeakPassword ? PASSWORD_RULE_MESSAGE : "bad_input" });
+    }
 
     const { username, password } = parsed.data;
     const hash = await bcrypt.hash(password, 10);
@@ -244,7 +256,12 @@ async function main() {
 
   app.post("/api/auth/recover", recoveryLimiter, async (req, res) => {
     const parsed = recoverSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "bad_input" });
+    if (!parsed.success) {
+      const hasWeakPassword = parsed.error?.issues?.some(
+        (issue) => issue.message === PASSWORD_RULE_MESSAGE
+      );
+      return res.status(400).json({ error: hasWeakPassword ? PASSWORD_RULE_MESSAGE : "bad_input" });
+    }
 
     const { username, recoveryCode, newPassword } = parsed.data;
     const { rows } = await pool.query(
@@ -275,8 +292,8 @@ async function main() {
   app.get("/api/auth/config", (_req, res) => {
     res.json({
       allowRegistration: ALLOW_REGISTRATION,
-      username: { min: USERNAME_MIN, max: USERNAME_MAX, pattern: "^[a-zA-Z0-9_-]+$" },
-      password: { min: PASSWORD_MIN, requiresUpper: true, requiresLower: true, requiresNumber: true }
+      username: { min: USERNAME_MIN, max: USERNAME_MAX, pattern: USERNAME_REGEX_SOURCE },
+      password: { min: PASSWORD_MIN, regex: PASSWORD_REGEX_SOURCE, message: PASSWORD_RULE_MESSAGE }
     });
   });
 

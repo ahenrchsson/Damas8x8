@@ -120,11 +120,17 @@ const INACTIVITY_MS = 30_000;
 const BUZZ_COOLDOWN_MS = 10_000;
 const ACTIVITY_THROTTLE_MS = 1_000;
 let lastActivitySentAt = 0;
-const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+const DEFAULT_USERNAME_REGEX_SOURCE = "^[a-zA-Z0-9_-]+$";
+const DEFAULT_PASSWORD_REGEX_SOURCE = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)[A-Za-z\\d]{8,}$";
+const DEFAULT_PASSWORD_MESSAGE =
+  "La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número.";
+let usernameRegex = new RegExp(DEFAULT_USERNAME_REGEX_SOURCE);
+let passwordRegex = new RegExp(DEFAULT_PASSWORD_REGEX_SOURCE);
+let passwordMessage = DEFAULT_PASSWORD_MESSAGE;
 let authConfig = {
   allowRegistration: true,
-  username: { min: 3, max: 20 },
-  password: { min: 8 }
+  username: { min: 3, max: 20, pattern: DEFAULT_USERNAME_REGEX_SOURCE },
+  password: { min: 8, regex: DEFAULT_PASSWORD_REGEX_SOURCE, message: DEFAULT_PASSWORD_MESSAGE }
 };
 
 function getAudioManager() {
@@ -291,25 +297,23 @@ function validateUsername(username) {
     return `El usuario debe tener entre ${min} y ${max} caracteres.`;
   }
   if (/\s/.test(username)) return "El usuario no debe tener espacios.";
-  if (!USERNAME_REGEX.test(username)) {
-    return "El usuario solo puede incluir letras, números, guion y guion bajo.";
+  if (!usernameRegex.test(username)) {
+    return "El usuario solo puede incluir letras, números, guion bajo y guion medio.";
   }
   return null;
 }
 
 function validatePasswordStrength(password) {
-  const min = authConfig.password?.min ?? 8;
-  if (!password || password.length < min) {
-    return `La contraseña debe tener al menos ${min} caracteres.`;
-  }
-  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\\d/.test(password)) {
-    return "La contraseña debe incluir mayúsculas, minúsculas y números.";
+  if (!passwordRegex.test(password || "")) {
+    return passwordMessage;
   }
   return null;
 }
 
 function authErrorMessage(error, context) {
   switch (error) {
+    case passwordMessage:
+      return passwordMessage;
     case "username_taken":
       return "Ese usuario ya existe. Prueba otro.";
     case "bad_credentials":
@@ -334,9 +338,22 @@ async function loadAuthConfig() {
     const data = await api("/api/auth/config");
     if (data?.username) authConfig.username = data.username;
     if (data?.password) authConfig.password = data.password;
+    if (authConfig.username?.pattern) {
+      usernameRegex = new RegExp(authConfig.username.pattern);
+    }
+    if (authConfig.password?.regex) {
+      passwordRegex = new RegExp(authConfig.password.regex);
+    }
+    if (authConfig.password?.message) {
+      passwordMessage = authConfig.password.message;
+    }
     authConfig.allowRegistration = data?.allowRegistration ?? true;
   } catch (_) {
-    authConfig = authConfig || { allowRegistration: true, username: { min: 3, max: 20 }, password: { min: 8 } };
+    authConfig = authConfig || {
+      allowRegistration: true,
+      username: { min: 3, max: 20, pattern: DEFAULT_USERNAME_REGEX_SOURCE },
+      password: { min: 8, regex: DEFAULT_PASSWORD_REGEX_SOURCE, message: DEFAULT_PASSWORD_MESSAGE }
+    };
   }
   if (btnRegister) btnRegister.disabled = !authConfig.allowRegistration;
   if (registrationStatus) {
