@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin>
+  <name>Branding Lite</name>
+  <key>branding_lite</key>
+  <version>1.0.0</version>
+  <author>OpenAI</author>
+  <license>GPLv3</license>
+  <homepage>https://example.invalid</homepage>
+  <compatibility>
+    <version min="11.0.0" max="11.999.0" />
+  </compatibility>
+</plugin>
