@@ -72,6 +72,7 @@ const versionFloating = $("versionFloating");
 const themeSelect = $("themeSelect");
 const soundToggle = $("soundToggle");
 const soundVolume = $("soundVolume");
+const animToggle = $("animToggle");
 const matchMeta = $("matchMeta");
 const focusPill = $("focusPill");
 const lowerPanel = $("lowerPanel");
@@ -116,6 +117,16 @@ let lastMoveKey = null;
 let activityByColor = { red: null, black: null };
 let lastBuzzSentAt = 0;
 let buzzToastTimer = null;
+let pendingMoveAnimation = null;
+let lastMoveAnimationKey = null;
+let moveAnimationsEnabled = true;
+let trailSvg = null;
+let previewTrailGroup = null;
+let moveTrailGroup = null;
+let moveTrailTimeout = null;
+let moveHighlightTimeout = null;
+let activeGhostPiece = null;
+let activeGhostTimer = null;
 
 const INACTIVITY_MS = 30_000;
 const BUZZ_COOLDOWN_MS = 10_000;
@@ -131,6 +142,7 @@ const DEFAULT_PASSWORD_MESSAGE =
 let usernameRegex = new RegExp(DEFAULT_USERNAME_REGEX_SOURCE);
 let passwordRegex = new RegExp(DEFAULT_PASSWORD_REGEX_SOURCE);
 let passwordMessage = DEFAULT_PASSWORD_MESSAGE;
+const MOVE_ANIMATIONS_KEY = "moveAnimationsEnabled";
 let authConfig = {
   allowRegistration: true,
   username: { min: 3, max: 20, pattern: DEFAULT_USERNAME_REGEX_SOURCE },
@@ -174,6 +186,29 @@ function initSoundControls() {
       const nextValue = Number(soundVolume.value);
       audio.setVolume?.(Number.isNaN(nextValue) ? 0.5 : nextValue / 10);
       updateSoundUI();
+    });
+  }
+}
+
+function initMoveAnimationToggle() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(MOVE_ANIMATIONS_KEY);
+  } catch {
+    stored = null;
+  }
+  if (stored !== null) {
+    moveAnimationsEnabled = stored === "true";
+  }
+  if (animToggle) animToggle.checked = moveAnimationsEnabled;
+  if (animToggle) {
+    animToggle.addEventListener("change", (event) => {
+      moveAnimationsEnabled = !!event.target.checked;
+      try {
+        localStorage.setItem(MOVE_ANIMATIONS_KEY, String(moveAnimationsEnabled));
+      } catch {
+        // ignore storage failures
+      }
     });
   }
 }
@@ -569,7 +604,9 @@ function initSocket() {
     committedMove = null;
     hoverMove = null;
     handleStateSounds(prevState, state);
+    prepareMoveAnimation(prevState, state);
     renderBoard();
+    runPendingMoveAnimation();
     renderChat();
     updateChatControls();
     updateBuzzUI();
@@ -763,7 +800,11 @@ let currentPreviewBadges = [];
 
 function coordKey(c) { return `${c.r},${c.c}`; }
 function parseKey(key) { const [r, c] = key.split(",").map(Number); return { r, c }; }
-function squareName({ r, c }) { return `${files[c]}${8 - r}`; }
+function squareName(coord) {
+  if (!coord) return "—";
+  const ui = engineToUiCoord(coord);
+  return `${files[ui.c]}${8 - ui.r}`;
+}
 function isSameCoord(a, b) { return a && b && a.r === b.r && a.c === b.c; }
 function colorOfPiece(v) { return v > 0 ? "red" : (v < 0 ? "black" : null); }
 function normalizeBlowablePieces(list) {
@@ -785,6 +826,175 @@ function lastMoveKeyFor(st) {
   const color = st.lastMove.color || "none";
   const turnNumber = st.lastMovedByColor?.[color]?.turnNumber ?? st.turnCount ?? "0";
   return `${color}:${turnNumber}:${moveSig(st.lastMove.move)}`;
+}
+
+function isPerspectiveFlipped() {
+  const myColor = getMyColor();
+  return myColor === "black";
+}
+
+function engineToUiCoord(coord) {
+  if (!coord) return { r: 0, c: 0 };
+  if (!isPerspectiveFlipped()) return { r: coord.r, c: coord.c };
+  return { r: 7 - coord.r, c: 7 - coord.c };
+}
+
+function uiToEngineCoord(coord) {
+  if (!coord) return { r: 0, c: 0 };
+  if (!isPerspectiveFlipped()) return { r: coord.r, c: coord.c };
+  return { r: 7 - coord.r, c: 7 - coord.c };
+}
+
+function ensureTrailLayer() {
+  if (!boardEl) return;
+  if (!trailSvg) {
+    trailSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    trailSvg.classList.add("trailOverlay");
+    trailSvg.setAttribute("viewBox", "0 0 100 100");
+    trailSvg.setAttribute("preserveAspectRatio", "none");
+    previewTrailGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    previewTrailGroup.classList.add("trailGroup", "previewTrail");
+    moveTrailGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    moveTrailGroup.classList.add("trailGroup", "moveTrail");
+    trailSvg.appendChild(previewTrailGroup);
+    trailSvg.appendChild(moveTrailGroup);
+  }
+  if (!boardEl.contains(trailSvg)) {
+    boardEl.appendChild(trailSvg);
+  }
+}
+
+function clearTrailGroup(group) {
+  if (!group) return;
+  group.innerHTML = "";
+}
+
+function coordToPercent(coord) {
+  const ui = engineToUiCoord(coord);
+  const x = ((ui.c + 0.5) / 8) * 100;
+  const y = ((ui.r + 0.5) / 8) * 100;
+  return { x, y };
+}
+
+function drawTrail(path, group, className = "") {
+  ensureTrailLayer();
+  if (!group) return;
+  clearTrailGroup(group);
+  if (!Array.isArray(path) || path.length < 2) return;
+  const points = path.map((p) => {
+    const { x, y } = coordToPercent(p);
+    return `${x},${y}`;
+  }).join(" ");
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  line.setAttribute("points", points);
+  line.classList.add("trailLine");
+  if (className) line.classList.add(className);
+  group.appendChild(line);
+}
+
+function clearMoveAnimationEffects() {
+  if (moveHighlightTimeout) window.clearTimeout(moveHighlightTimeout);
+  if (moveTrailTimeout) window.clearTimeout(moveTrailTimeout);
+  moveHighlightTimeout = null;
+  moveTrailTimeout = null;
+  boardEl?.querySelectorAll(".moveOrigin, .moveDestination").forEach((cell) => {
+    cell.classList.remove("moveOrigin", "moveDestination");
+  });
+  clearTrailGroup(moveTrailGroup);
+  if (activeGhostTimer) window.clearTimeout(activeGhostTimer);
+  activeGhostTimer = null;
+  if (activeGhostPiece) {
+    activeGhostPiece.remove();
+    activeGhostPiece = null;
+  }
+}
+
+function highlightMoveEndpoints(move, duration = 600) {
+  if (!move) return;
+  const fromCell = getCell(move.pieceFrom);
+  const toCell = getCell(move.pieceTo);
+  if (fromCell) fromCell.classList.add("moveOrigin");
+  if (toCell) toCell.classList.add("moveDestination");
+  moveHighlightTimeout = window.setTimeout(() => {
+    if (fromCell) fromCell.classList.remove("moveOrigin");
+    if (toCell) toCell.classList.remove("moveDestination");
+  }, duration);
+}
+
+function showMoveTrail(path, duration = 700) {
+  if (!Array.isArray(path) || path.length < 2) return;
+  drawTrail(path, moveTrailGroup, "moveTrailLine");
+  moveTrailTimeout = window.setTimeout(() => {
+    clearTrailGroup(moveTrailGroup);
+  }, duration);
+}
+
+function createGhostPiece(pieceValue, colorHint) {
+  const ghost = document.createElement("div");
+  ghost.className = "piece ghostPiece";
+  const color = pieceValue ? colorOfPiece(pieceValue) : colorHint;
+  if (color) ghost.classList.add(color);
+  if (pieceValue && Math.abs(pieceValue) === 2) ghost.classList.add("king");
+  return ghost;
+}
+
+function positionGhost(ghost, uiCoord, size) {
+  const pad = size * 0.12;
+  ghost.style.width = `${size * 0.76}px`;
+  ghost.style.height = `${size * 0.76}px`;
+  ghost.style.left = `${uiCoord.c * size + pad}px`;
+  ghost.style.top = `${uiCoord.r * size + pad}px`;
+}
+
+async function animateMoveGhost(move, pieceValue, colorHint) {
+  if (!moveAnimationsEnabled || !boardEl || !move?.path || move.path.length < 2) return;
+  const rect = boardEl.getBoundingClientRect();
+  if (!rect.width) return;
+  const size = rect.width / 8;
+  if (activeGhostPiece) activeGhostPiece.remove();
+  const ghost = createGhostPiece(pieceValue, colorHint);
+  activeGhostPiece = ghost;
+  boardEl.appendChild(ghost);
+  const uiStart = engineToUiCoord(move.path[0]);
+  positionGhost(ghost, uiStart, size);
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  for (let i = 1; i < move.path.length; i++) {
+    const ui = engineToUiCoord(move.path[i]);
+    positionGhost(ghost, ui, size);
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => {
+      activeGhostTimer = window.setTimeout(resolve, 190);
+    });
+  }
+  activeGhostTimer = window.setTimeout(() => {
+    if (ghost) ghost.remove();
+    if (activeGhostPiece === ghost) activeGhostPiece = null;
+  }, 220);
+}
+
+function prepareMoveAnimation(prevState, nextState) {
+  if (!prevState) return;
+  if (!nextState?.lastMove?.move) return;
+  const moveKey = lastMoveKeyFor(nextState);
+  if (!moveKey || moveKey === lastMoveAnimationKey) return;
+  lastMoveAnimationKey = moveKey;
+  const myColor = getMyColor();
+  const moveColor = nextState.lastMove.color;
+  const isOpponent = myColor ? moveColor !== myColor : true;
+  if (!isOpponent) return;
+  const move = nextState.lastMove.move;
+  const pieceValue = prevState?.board?.[move.pieceFrom.r]?.[move.pieceFrom.c] ?? null;
+  pendingMoveAnimation = { move, color: moveColor, pieceValue };
+}
+
+function runPendingMoveAnimation() {
+  if (!pendingMoveAnimation) return;
+  const { move, color, pieceValue } = pendingMoveAnimation;
+  pendingMoveAnimation = null;
+  clearMoveAnimationEffects();
+  highlightMoveEndpoints(move);
+  showMoveTrail(move.path);
+  animateMoveGhost(move, pieceValue, color);
 }
 function handleStateSounds(prevState, nextState) {
   const audio = getAudioManager();
@@ -882,12 +1092,14 @@ function clearPreview() {
   });
   currentPreviewBadges.forEach((b) => b.remove());
   currentPreviewBadges = [];
+  clearTrailGroup(previewTrailGroup);
 }
 
 function showPreview(move, opts = {}) {
   if (!move) return;
   clearPreview();
   const partialUntil = opts.partialUntil || move.path.length;
+  const trailPath = move.path.slice(0, Math.min(partialUntil + 1, move.path.length));
   move.path.forEach((p, idx) => {
     const cell = getCell(p);
     if (!cell) return;
@@ -910,6 +1122,7 @@ function showPreview(move, opts = {}) {
     cell.appendChild(badge);
     currentPreviewBadges.push(badge);
   });
+  drawTrail(trailPath, previewTrailGroup, "previewTrailLine");
 }
 
 function nextLandingOptions(sel) {
@@ -955,6 +1168,11 @@ function renderRouteCards(baseMoves) {
       <div class="routePath">${pathTxt}</div>
     `;
     card.onclick = () => selectRoute(mv);
+    card.onmouseenter = () => showPreview(mv);
+    card.onmouseleave = () => {
+      const fallback = committedMove || selection?.candidates?.[0] || mv;
+      showPreview(fallback);
+    };
     routeOptions.appendChild(card);
   });
 }
@@ -1062,6 +1280,10 @@ function renderBoard() {
   currentTargets = [];
   currentPreviewBadges = [];
   boardCells = [];
+  trailSvg = null;
+  previewTrailGroup = null;
+  moveTrailGroup = null;
+  clearMoveAnimationEffects();
   if (!state) {
     status.textContent = "Crea o únete a una sala desde el panel inferior";
     renderMovePanel();
@@ -1077,11 +1299,16 @@ function renderBoard() {
   const canBlow = myTurn && currentRole === "player" && blowablePieces.length > 0;
   const lastMoves = state.lastMovedByColor || {};
   const opponent = myColor ? (myColor === "red" ? "black" : "red") : null;
+  const myLastMove = myColor ? lastMoves[myColor] : null;
+  const opponentLastMove = opponent ? lastMoves[opponent] : null;
 
-  for (let r = 0; r < 8; r++) {
-    for (let c = 0; c < 8; c++) {
+  for (let uiR = 0; uiR < 8; uiR++) {
+    for (let uiC = 0; uiC < 8; uiC++) {
+      const engineCoord = uiToEngineCoord({ r: uiR, c: uiC });
+      const r = engineCoord.r;
+      const c = engineCoord.c;
       const cell = document.createElement("div");
-      cell.className = "cell " + (((r + c) % 2 === 1) ? "dark" : "light");
+      cell.className = "cell " + (((uiR + uiC) % 2 === 1) ? "dark" : "light");
       cell.dataset.r = r;
       cell.dataset.c = c;
 
@@ -1114,20 +1341,23 @@ function renderBoard() {
       }
 
       const pieceColor = colorOfPiece(v);
-      const lastByColor = pieceColor ? lastMoves[pieceColor] : null;
-      const lastOpp = opponent ? lastMoves[opponent] : null;
-      if (lastByColor && isSameCoord(lastByColor.to, { r, c })) {
-        cell.classList.add("lastMovedPiece");
-        if (opponent && pieceColor === opponent) cell.classList.add("lastMovedOpponent");
-      } else if (lastOpp && isSameCoord(lastOpp.to, { r, c }) && !pieceColor) {
-        // highlight landing even si la pieza fue eliminada
-        cell.classList.add("lastMovedOpponent");
+      if (myLastMove) {
+        if (isSameCoord(myLastMove.to, { r, c })) cell.classList.add("lastMovedPiece");
+      }
+      if (opponentLastMove) {
+        if (isSameCoord(opponentLastMove.from, { r, c })) {
+          cell.classList.add("lastMovedOrigin", "lastMovedOpponent");
+        }
+        if (isSameCoord(opponentLastMove.to, { r, c })) {
+          cell.classList.add("lastMovedPiece", "lastMovedOpponent");
+        }
       }
 
       boardEl.appendChild(cell);
-      boardCells.push(cell);
+      boardCells[r * 8 + c] = cell;
     }
   }
+  ensureTrailLayer();
   refreshSelectionUI();
 }
 
@@ -1542,6 +1772,7 @@ window.addEventListener("resize", () => {
   await loadVersion();
   initThemeSelector();
   initSoundControls();
+  initMoveAnimationToggle();
   if (me) {
     await refreshLeaderboard();
     refreshLobby();

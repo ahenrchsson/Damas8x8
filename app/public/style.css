@@ -50,6 +50,10 @@ body.theme-technology {
   --preview-badge-text: #ffffff;
   --capture-badge-bg: #00c896;
   --capture-badge-text: #0f1115;
+  --trail-line: rgba(120, 200, 255, 0.7);
+  --trail-line-opponent: rgba(255, 215, 0, 0.8);
+  --highlight-move-origin: rgba(255, 140, 0, 0.55);
+  --highlight-move-dest: rgba(0, 255, 170, 0.6);
 }
 
 body.theme-classic {
@@ -83,6 +87,10 @@ body.theme-classic {
   --preview-badge-text: #ffffff;
   --capture-badge-bg: #2fbf8f;
   --capture-badge-text: #0b120f;
+  --trail-line: rgba(100, 190, 255, 0.7);
+  --trail-line-opponent: rgba(255, 200, 80, 0.8);
+  --highlight-move-origin: rgba(255, 155, 40, 0.6);
+  --highlight-move-dest: rgba(0, 210, 140, 0.65);
 }
 
 body.theme-wooden {
@@ -116,6 +124,10 @@ body.theme-wooden {
   --preview-badge-text: #ffffff;
   --capture-badge-bg: #2fb890;
   --capture-badge-text: #0c120d;
+  --trail-line: rgba(120, 200, 255, 0.7);
+  --trail-line-opponent: rgba(255, 205, 120, 0.8);
+  --highlight-move-origin: rgba(255, 165, 60, 0.6);
+  --highlight-move-dest: rgba(0, 210, 150, 0.65);
 }
 
 .topbar { display:flex; justify-content:space-between; align-items:center; padding: 14px 18px; background:var(--surface); border-bottom:1px solid var(--surface-border); position:sticky; top:0; z-index:5; }
@@ -145,6 +157,8 @@ h3 { margin-top: 0; }
 .cardHeader { display:flex; align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .row { display:flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
 .row.stack { flex-direction: column; }
+.row.toggleRow { align-items: center; justify-content: space-between; }
+.row.toggleRow input[type="checkbox"] { transform: scale(1.1); }
 input, select { background:var(--background); border:1px solid var(--surface-border-strong); border-radius: 10px; padding: 10px 12px; color:var(--text-primary); outline: none; min-width: 0; }
 button { background:#2b6cff; color:white; border:none; border-radius:10px; padding:10px 12px; cursor:pointer; font-weight: 700; }
 button:disabled { opacity: .45; cursor:not-allowed; }
@@ -192,8 +206,9 @@ button.danger { background: #e04f5f; }
   border:1px solid var(--board-border);
   user-select:none;
   background:var(--board-frame);
+  position: relative;
 }
-.cell { display:flex; align-items:center; justify-content:center; position: relative; }
+.cell { display:flex; align-items:center; justify-content:center; position: relative; z-index: 2; }
 .dark { background:var(--board-dark); }
 .light { background:var(--board-light); }
 .cell.clickable { outline: 2px solid var(--highlight-clickable); outline-offset: -2px; cursor:pointer; }
@@ -205,6 +220,9 @@ button.danger { background: #e04f5f; }
 .cell.lastMovedPiece::after { content: "●"; position:absolute; top:6px; right:6px; font-size: 10px; opacity:.7; color:var(--highlight-last-dot); }
 .cell.lastMovedOpponent { box-shadow: inset 0 0 0 3px var(--highlight-last-opponent); }
 .cell.lastMovedOpponent::after { color:var(--highlight-last-opponent-dot); }
+.cell.lastMovedOrigin { box-shadow: inset 0 0 0 3px var(--highlight-move-origin); }
+.cell.moveOrigin { box-shadow: inset 0 0 0 3px var(--highlight-move-origin); }
+.cell.moveDestination { box-shadow: inset 0 0 0 3px var(--highlight-move-dest); }
 
 .piece { width: 76%; height: 76%; border-radius: 999px; box-shadow: inset 0 0 0 2px var(--piece-ring), var(--piece-shadow); position: relative; }
 .red { background:var(--piece-light); }
@@ -216,6 +234,10 @@ button.danger { background: #e04f5f; }
 .cell.preview-step { box-shadow: inset 0 0 0 3px var(--preview-outline); }
 .cell.preview-step::after { content: attr(data-step); position:absolute; top:6px; left:6px; background:var(--preview-badge-bg); color:var(--preview-badge-text); width:18px; height:18px; border-radius: 999px; font-size: 12px; display:flex; align-items:center; justify-content:center; }
 .captureBadge { position:absolute; bottom:6px; right:6px; background: var(--capture-badge-bg); color:var(--capture-badge-text); width:20px; height:20px; border-radius: 999px; display:flex; align-items:center; justify-content:center; font-size: 12px; font-weight: 800; box-shadow: 0 2px 6px rgba(0,0,0,.45); }
+.trailOverlay { position:absolute; inset:0; z-index: 1; pointer-events:none; }
+.trailLine { fill: none; stroke: var(--trail-line); stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
+.trailLine.moveTrailLine { stroke: var(--trail-line-opponent); stroke-dasharray: 4 6; }
+.ghostPiece { position:absolute; z-index: 3; pointer-events:none; opacity: 0.95; transition: top 180ms ease, left 180ms ease; }
 
 .infoLine { margin: 6px 0; opacity: .9; }
 .players { display:flex; flex-direction: column; gap: 6px; margin: 8px 0; }
