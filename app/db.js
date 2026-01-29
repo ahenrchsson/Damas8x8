@@ -11,11 +11,17 @@ async function migrate(pool) {
       username      TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       recovery_hash TEXT,
-      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_login    TIMESTAMPTZ,
+      disabled      BOOLEAN NOT NULL DEFAULT FALSE
     );
 
     ALTER TABLE app_users
       ADD COLUMN IF NOT EXISTS recovery_hash TEXT;
+    ALTER TABLE app_users
+      ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ;
+    ALTER TABLE app_users
+      ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT FALSE;
 
     CREATE TABLE IF NOT EXISTS ratings (
       user_id     INTEGER PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
@@ -54,6 +60,15 @@ async function migrate(pool) {
 
     CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings(rating DESC);
     CREATE INDEX IF NOT EXISTS idx_games_played_at ON games(played_at DESC);
+
+    CREATE TABLE IF NOT EXISTS admin_audit (
+      id            BIGSERIAL PRIMARY KEY,
+      admin_session TEXT,
+      action        TEXT NOT NULL,
+      target_user_id INTEGER REFERENCES app_users(id),
+      meta          JSONB,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

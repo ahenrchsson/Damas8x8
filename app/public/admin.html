@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Consola de Administración</title>
+  <link rel="stylesheet" href="/style.css"/>
+  <script defer src="/admin.js"></script>
+</head>
+<body class="theme-technology adminBody">
+  <div class="topbar">
+    <div class="brand">🛡️ Consola de Administración</div>
+    <div class="top-actions">
+      <a class="ghost" href="/">Volver al lobby</a>
+      <div id="versionBadge" class="versionBadge">v1.4.1</div>
+    </div>
+  </div>
+
+  <div class="wrap adminWrap">
+    <div class="card adminCard" id="adminLoginCard">
+      <h2>Acceso administrador</h2>
+      <p class="hint">Ingresa la contraseña configurada en <strong>ADMIN_PASSWORD</strong>.</p>
+      <div class="row">
+        <input id="adminPassword" type="password" placeholder="contraseña admin" autocomplete="current-password"/>
+        <button id="adminLoginBtn">Entrar</button>
+      </div>
+      <div class="hint" id="adminLoginMsg"></div>
+    </div>
+
+    <div class="card adminCard hidden" id="adminConsole">
+      <div class="adminHeader">
+        <div>
+          <h2>Usuarios registrados</h2>
+          <div class="hint">Administra usuarios y resetea contraseñas sin afectar el login actual.</div>
+        </div>
+        <div class="adminActions">
+          <button id="adminRefreshBtn" class="ghost">Actualizar</button>
+          <button id="adminLogoutBtn" class="ghost">Salir</button>
+        </div>
+      </div>
+      <div class="row adminFilters">
+        <input id="adminSearch" placeholder="Buscar usuario..." autocomplete="off"/>
+      </div>
+      <div id="adminStatus" class="hint"></div>
+      <div class="adminTableWrap">
+        <table class="adminTable">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Estado</th>
+              <th>Creado</th>
+              <th>Último login</th>
+              <th>Recovery</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="adminUsersBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="adminModal" class="modal hidden" aria-hidden="true">
+    <div class="modalBackdrop"></div>
+    <div class="modalCard">
+      <h3 id="adminModalTitle"></h3>
+      <div id="adminModalBody"></div>
+      <div class="row modalActions">
+        <button id="adminModalConfirm">Guardar</button>
+        <button id="adminModalCancel" class="ghost">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

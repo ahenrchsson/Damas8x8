@@ -11,6 +11,7 @@ POSTGRES_PASSWORD=<contraseña_segura>
 SESSION_SECRET=<secreto_de_sesión>
 TRUST_PROXY=true
 APP_PORT=<puerto_expuesto>
+ADMIN_PASSWORD=<clave_admin>
 ```
 
 ## Puesta en marcha

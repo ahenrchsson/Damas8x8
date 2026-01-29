@@ -14,6 +14,10 @@ const recoveryCode = $("recoveryCode");
 const recoveryPassword = $("recoveryPassword");
 const recoveryPasswordConfirm = $("recoveryPasswordConfirm");
 const recoveryNotice = $("recoveryNotice");
+const recoveryNoticeTitle = $("recoveryNoticeTitle");
+const recoveryNoticeCode = $("recoveryNoticeCode");
+const btnCopyRecovery = $("btnCopyRecovery");
+const recoveryCopyStatus = $("recoveryCopyStatus");
 const btnLogin = $("btnLogin");
 const btnRegister = $("btnRegister");
 const btnRanking = $("btnRanking");
@@ -354,13 +358,39 @@ async function api(path, method = "GET", body) {
 function clearRecoveryNotice() {
   if (!recoveryNotice) return;
   recoveryNotice.classList.add("hidden");
-  recoveryNotice.textContent = "";
+  if (recoveryNoticeTitle) recoveryNoticeTitle.textContent = "";
+  if (recoveryNoticeCode) recoveryNoticeCode.value = "";
+  if (recoveryCopyStatus) recoveryCopyStatus.textContent = "";
 }
 
 function showRecoveryNotice(message, code) {
   if (!recoveryNotice) return;
-  recoveryNotice.innerHTML = `${message} <strong>${code}</strong>`;
+  if (recoveryNoticeTitle) recoveryNoticeTitle.textContent = message;
+  if (recoveryNoticeCode) recoveryNoticeCode.value = code;
+  if (recoveryCopyStatus) recoveryCopyStatus.textContent = "";
   recoveryNotice.classList.remove("hidden");
+}
+
+if (recoveryNoticeCode) {
+  recoveryNoticeCode.addEventListener("focus", () => recoveryNoticeCode.select());
+  recoveryNoticeCode.addEventListener("click", () => recoveryNoticeCode.select());
+}
+
+if (btnCopyRecovery) {
+  btnCopyRecovery.onclick = async () => {
+    const code = recoveryNoticeCode?.value || "";
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      if (recoveryCopyStatus) recoveryCopyStatus.textContent = "Copiado ✅";
+    } catch {
+      if (recoveryCopyStatus) {
+        recoveryCopyStatus.textContent = "No se pudo copiar. Selecciona el código y copia manualmente.";
+      }
+      recoveryNoticeCode?.focus();
+      recoveryNoticeCode?.select();
+    }
+  };
 }
 
 function validateUsername(username) {
@@ -392,6 +422,8 @@ function authErrorMessage(error, context) {
       return "Ese usuario ya existe. Prueba otro.";
     case "bad_credentials":
       return "Usuario o contraseña incorrectos.";
+    case "account_disabled":
+      return "Tu cuenta está deshabilitada. Contacta al administrador.";
     case "registration_disabled":
       return "El registro está deshabilitado. Contacta al administrador.";
     case "registration_limited":
@@ -1492,7 +1524,6 @@ if (btnRecover) {
       });
       if (data?.recoveryCode) {
         showRecoveryNotice("Nuevo código de recuperación:", data.recoveryCode);
-        window.alert(`Nuevo código de recuperación:\n${data.recoveryCode}`);
       }
       if (recoveryPassword) recoveryPassword.value = "";
       if (recoveryPasswordConfirm) recoveryPasswordConfirm.value = "";
@@ -1548,7 +1579,6 @@ btnRegister.onclick = async () => {
     const data = await api("/api/auth/register", "POST", { username, password });
     if (data?.recoveryCode) {
       showRecoveryNotice("Guarda este código de recuperación:", data.recoveryCode);
-      window.alert(`Guarda este código de recuperación:\n${data.recoveryCode}`);
     }
     await refreshMe();
   } catch (e) {

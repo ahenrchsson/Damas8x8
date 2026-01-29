@@ -25,6 +25,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       TRUST_PROXY: ${TRUST_PROXY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     ports:
       - "${APP_PORT}:3000"
     depends_on:
