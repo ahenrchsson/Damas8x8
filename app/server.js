@@ -42,12 +42,12 @@ const {
   pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.4.1";
+let VERSION = "v1.5.0";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.4.1";
+  VERSION = "v1.5.0";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -918,7 +918,9 @@ async function main() {
 
     room.pendingDraw = null;
     room.missedCapture = null;
-    const { move, generated, legalMoves = [] } = pickLegalAIMove(room.board, room.turn);
+    const { move, generated, legalMoves = [] } = pickLegalAIMove(room.board, room.turn, {
+      difficulty: room.difficulty || "easy"
+    });
     if (!move || legalMoves.length === 0) return;
 
     const match = legalMoves.find((m) => moveSignature(m) === moveSignature(move));
