@@ -183,9 +183,43 @@ test("AI move selection always returns a legal move", () => {
   b[4][1] = -1; // negro capturable
   b[2][2] = -1; // segundo negro para asegurar al menos un movimiento
 
-  const { move, generated, legalMoves } = pickLegalAIMove(b, "red");
+  const { move, generated, legalMoves } = pickLegalAIMove(b, "red", { difficulty: "easy", rng: () => 0.1 });
   const sigs = (legalMoves || []).map((m) => moveSignature(m));
   assert.ok(move, "la IA debe devolver un movimiento");
   assert.ok(sigs.includes(moveSignature(move)), "el movimiento de IA debe estar en legalMoves");
   assert.ok(generated.moves.some((m) => moveSignature(m) === moveSignature(move)), "el movimiento debe provenir del generador");
+});
+
+test("AI returns legal moves across difficulties", () => {
+  const b = emptyBoard();
+  b[5][0] = 1;
+  b[4][1] = -1;
+  b[6][3] = 1;
+  b[3][4] = -1;
+
+  const difficulties = ["easy", "medium", "hard", "extreme"];
+  difficulties.forEach((difficulty) => {
+    const { move, legalMoves } = pickLegalAIMove(b, "red", {
+      difficulty,
+      timeLimitMs: 60,
+      rng: () => 0.3
+    });
+    assert.ok(move, `debe devolver un movimiento en ${difficulty}`);
+    const sigs = (legalMoves || []).map((m) => moveSignature(m));
+    assert.ok(sigs.includes(moveSignature(move)), `el movimiento debe ser legal en ${difficulty}`);
+  });
+});
+
+test("hard and extreme prioritize captures when available", () => {
+  const b = emptyBoard();
+  b[5][0] = 1;
+  b[4][1] = -1;
+  b[6][5] = 1;
+  b[5][6] = 0;
+
+  ["hard", "extreme"].forEach((difficulty) => {
+    const { move } = pickLegalAIMove(b, "red", { difficulty, timeLimitMs: 80, rng: () => 0.2 });
+    assert.ok(move, `debe devolver movimiento en ${difficulty}`);
+    assert.ok(move.isCapture, `debe capturar en ${difficulty}`);
+  });
 });
