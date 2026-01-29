@@ -42,12 +42,12 @@ const {
   pickLegalAIMove
 } = require("./game");
 
-let VERSION = "v1.4.0";
+let VERSION = "v1.4.1";
 try {
   const raw = fs.readFileSync(path.join(__dirname, "VERSION"), "utf8");
   if (raw) VERSION = raw.trim();
 } catch (_) {
-  VERSION = "v1.4.0";
+  VERSION = "v1.4.1";
 }
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev";
@@ -56,6 +56,7 @@ const ALLOW_REGISTRATION = (process.env.ALLOW_REGISTRATION || "true").toLowerCas
 const REGISTRATION_LIMIT_PER_IP = Number.parseInt(process.env.REGISTRATION_LIMIT_PER_IP || "3", 10);
 const RECOVERY_RATE_LIMIT = Number.parseInt(process.env.RECOVERY_RATE_LIMIT || "5", 10);
 const RECOVERY_CODE_LENGTH = Number.parseInt(process.env.RECOVERY_CODE_LENGTH || "14", 10);
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
 console.log(`Starting Damas8x8 ${VERSION}`);
 
@@ -190,6 +191,30 @@ async function main() {
     next();
   }
 
+  function requireAdmin(req, res, next) {
+    if (!req.session?.isAdmin) return res.status(401).json({ error: "admin_required" });
+    next();
+  }
+
+  async function logAdminAction(req, action, targetUserId = null, meta = {}) {
+    const adminSession = req.sessionID || null;
+    const payload = {
+      action,
+      targetUserId,
+      meta
+    };
+    console.log("[admin]", payload);
+    try {
+      await pool.query(
+        `INSERT INTO admin_audit (admin_session, action, target_user_id, meta)
+         VALUES ($1, $2, $3, $4)`,
+        [adminSession, action, targetUserId, meta]
+      );
+    } catch (err) {
+      console.error("admin_audit_failed", err);
+    }
+  }
+
   app.post("/api/auth/register", async (req, res) => {
     if (!ALLOW_REGISTRATION) {
       return res.status(403).json({ error: "registration_disabled" });
@@ -213,12 +238,12 @@ async function main() {
     const recoveryHash = await bcrypt.hash(recoveryCode, 10);
 
     try {
-      const { rows } = await pool.query(
-        `INSERT INTO app_users (username, password_hash, recovery_hash)
-         VALUES ($1,$2,$3)
+    const { rows } = await pool.query(
+      `INSERT INTO app_users (username, password_hash, recovery_hash, last_login)
+         VALUES ($1,$2,$3, NOW())
          RETURNING id, username`,
-        [username, hash, recoveryHash]
-      );
+      [username, hash, recoveryHash]
+    );
       const user = rows[0];
       await ensureUserRating(pool, user.id);
       req.session.userId = user.id;
@@ -236,14 +261,16 @@ async function main() {
 
     const { username, password } = parsed.data;
     const { rows } = await pool.query(
-      `SELECT id, username, password_hash FROM app_users WHERE username=$1`,
+      `SELECT id, username, password_hash, disabled FROM app_users WHERE username=$1`,
       [username]
     );
     if (!rows[0]) return res.status(401).json({ error: "bad_credentials" });
+    if (rows[0].disabled) return res.status(403).json({ error: "account_disabled" });
     const ok = await bcrypt.compare(password, rows[0].password_hash);
     if (!ok) return res.status(401).json({ error: "bad_credentials" });
 
     await ensureUserRating(pool, rows[0].id);
+    await pool.query(`UPDATE app_users SET last_login=NOW() WHERE id=$1`, [rows[0].id]);
     req.session.userId = rows[0].id;
     req.session.username = rows[0].username;
     return res.json({ ok: true, user: { id: rows[0].id, username: rows[0].username } });
@@ -252,6 +279,11 @@ async function main() {
   const recoveryLimiter = rateLimit({
     windowMs: 60_000,
     limit: RECOVERY_RATE_LIMIT
+  });
+
+  const adminLoginLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: 8
   });
 
   app.post("/api/auth/recover", recoveryLimiter, async (req, res) => {
@@ -265,11 +297,14 @@ async function main() {
 
     const { username, recoveryCode, newPassword } = parsed.data;
     const { rows } = await pool.query(
-      `SELECT id, recovery_hash FROM app_users WHERE username=$1`,
+      `SELECT id, recovery_hash, disabled FROM app_users WHERE username=$1`,
       [username]
     );
     if (!rows[0] || !rows[0].recovery_hash) {
       return res.status(400).json({ error: "recovery_failed" });
+    }
+    if (rows[0].disabled) {
+      return res.status(403).json({ error: "account_disabled" });
     }
     const matches = await bcrypt.compare(recoveryCode, rows[0].recovery_hash);
     if (!matches) {
@@ -369,6 +404,9 @@ async function main() {
   app.post("/api/rooms/:roomCode/close", requireAuth, handleCloseRequest);
 
   // ---------- Static ----------
+  app.get("/admin", (_req, res) => {
+    res.sendFile(path.join(__dirname, "public", "admin.html"));
+  });
   app.use(express.static(path.join(__dirname, "public")));
   app.use("/assets", express.static(path.join(__dirname, "assets")));
 
@@ -462,6 +500,103 @@ async function main() {
     });
     broadcastPresence();
   }
+
+  // ---------- Admin ----------
+  app.post("/api/admin/login", adminLoginLimiter, async (req, res) => {
+    if (!ADMIN_PASSWORD) {
+      return res.status(503).json({ error: "admin_not_configured" });
+    }
+    const password = req.body?.password || "";
+    if (!password) return res.status(400).json({ error: "bad_input" });
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ error: "bad_credentials" });
+    }
+    req.session.isAdmin = true;
+    req.session.adminLoggedAt = Date.now();
+    await logAdminAction(req, "login", null, { ip: normalizeClientIp(req) });
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/admin/logout", requireAdmin, async (req, res) => {
+    req.session.isAdmin = false;
+    delete req.session.adminLoggedAt;
+    await logAdminAction(req, "logout");
+    return res.json({ ok: true });
+  });
+
+  app.get("/api/admin/me", (req, res) => {
+    res.json({ isAdmin: !!req.session?.isAdmin });
+  });
+
+  app.get("/api/admin/users", requireAdmin, async (_req, res) => {
+    const { rows } = await pool.query(`
+      SELECT id, username, created_at, last_login, disabled, recovery_hash
+      FROM app_users
+      ORDER BY username ASC
+    `);
+    const presenceList = getPresenceList();
+    const presenceById = new Map(presenceList.map((entry) => [String(entry.userId), entry]));
+    const users = rows.map((row) => {
+      const presence = presenceById.get(String(row.id));
+      return {
+        id: row.id,
+        username: row.username,
+        createdAt: row.created_at,
+        lastLogin: row.last_login,
+        disabled: row.disabled,
+        hasRecovery: !!row.recovery_hash,
+        presence: presence ? {
+          status: presence.status,
+          connectedAt: presence.connectedAt,
+          connections: presence.connections
+        } : null
+      };
+    });
+    res.json({ users });
+  });
+
+  app.post("/api/admin/users/:id/reset-password", requireAdmin, async (req, res) => {
+    const userId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: "bad_input" });
+    const parsed = z.object({ newPassword: passwordSchema }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "bad_input" });
+    const hash = await bcrypt.hash(parsed.data.newPassword, 10);
+    const result = await pool.query(
+      `UPDATE app_users SET password_hash=$1 WHERE id=$2`,
+      [hash, userId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: "user_not_found" });
+    await logAdminAction(req, "reset_password", userId);
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/admin/users/:id/regenerate-recovery", requireAdmin, async (req, res) => {
+    const userId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: "bad_input" });
+    const nextRecoveryCode = nanoid(RECOVERY_CODE_LENGTH);
+    const nextRecoveryHash = await bcrypt.hash(nextRecoveryCode, 10);
+    const result = await pool.query(
+      `UPDATE app_users SET recovery_hash=$1 WHERE id=$2`,
+      [nextRecoveryHash, userId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: "user_not_found" });
+    await logAdminAction(req, "regenerate_recovery", userId);
+    return res.json({ ok: true, recoveryCode: nextRecoveryCode });
+  });
+
+  app.post("/api/admin/users/:id/disable", requireAdmin, async (req, res) => {
+    const userId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: "bad_input" });
+    const parsed = z.object({ disabled: z.boolean() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "bad_input" });
+    const result = await pool.query(
+      `UPDATE app_users SET disabled=$1 WHERE id=$2`,
+      [parsed.data.disabled, userId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: "user_not_found" });
+    await logAdminAction(req, parsed.data.disabled ? "disable_user" : "enable_user", userId);
+    return res.json({ ok: true });
+  });
 
   function roomPresenceStatus(room, role) {
     if (role === "observer") return "Observando";

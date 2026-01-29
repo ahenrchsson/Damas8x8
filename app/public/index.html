@@ -16,7 +16,7 @@
         <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
         <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
       </div>
-      <div id="versionBadge" class="versionBadge">v1.4.0</div>
+      <div id="versionBadge" class="versionBadge">v1.4.1</div>
     </div>
   </div>
 
@@ -70,7 +70,14 @@
           <button id="btnCancelRecovery" class="ghost" type="button">Cancelar</button>
         </div>
       </div>
-      <div id="recoveryNotice" class="notice hidden"></div>
+      <div id="recoveryNotice" class="notice hidden">
+        <div class="noticeTitle" id="recoveryNoticeTitle"></div>
+        <div class="noticeRow">
+          <input id="recoveryNoticeCode" readonly aria-label="Código de recuperación"/>
+          <button id="btnCopyRecovery" class="ghost" type="button">Copiar</button>
+        </div>
+        <div id="recoveryCopyStatus" class="hint"></div>
+      </div>
       <div class="hint" id="authMsg"></div>
     </div>
 
@@ -293,7 +300,7 @@
 
   <div id="buzzToast" class="buzzToast hidden" role="status" aria-live="polite"></div>
 
-  <div id="versionFloating" class="versionFloating">v1.4.0</div>
+  <div id="versionFloating" class="versionFloating">v1.4.1</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>
