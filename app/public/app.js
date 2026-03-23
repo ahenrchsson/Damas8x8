@@ -57,6 +57,10 @@ const playerRed = $("playerRed");
 const playerBlack = $("playerBlack");
 const btnRequestDraw = $("btnRequestDraw");
 const btnResign = $("btnResign");
+const btnHint = $("btnHint");
+const halfMoveInfo = $("halfMoveInfo");
+const moveHistoryList = $("moveHistoryList");
+const historyCount = $("historyCount");
 const btnLeaveRoom = $("btnLeaveRoom");
 const btnFinishRoom = $("btnFinishRoom");
 const resumeModal = $("resumeModal");
@@ -483,6 +487,7 @@ function setAuthUI(logged) {
   btnJoin.disabled = !canPlay;
   btnRequestDraw.disabled = !canPlay || !state || state.over || currentRole !== "player";
   btnResign.disabled = !canPlay || !state || state.over || currentRole !== "player";
+  if (btnHint) btnHint.disabled = !canPlay || !state || state.over || currentRole !== "player";
   btnLeaveRoom.disabled = !canPlay || !currentRoom || currentRole !== "player";
   btnFinishRoom.disabled = !canPlay || !currentRoom || currentRole !== "player";
   globalChatInput.disabled = !logged || !socketReady;
@@ -640,6 +645,18 @@ function initSocket() {
     renderBoard();
     runPendingMoveAnimation();
     renderChat();
+    renderMoveHistory(st.moveHistory || []);
+    // Half-move clock warning
+    if (halfMoveInfo) {
+      const hmc = st.halfMoveClock || 0;
+      if (hmc >= 30 && !st.over) {
+        halfMoveInfo.textContent = `Aviso: ${40 - hmc} movimientos sin captura/promoción para tablas por regla de 40.`;
+        halfMoveInfo.classList.remove("hidden");
+      } else {
+        halfMoveInfo.classList.add("hidden");
+      }
+    }
+    clearHintHighlight();
     updateChatControls();
     updateBuzzUI();
     setAuthUI(!!me);
@@ -670,6 +687,14 @@ function initSocket() {
   socket.on("err", (e) => {
     const msg = e?.message || e?.error || "Error";
     status.textContent = `Error: ${msg}`;
+  });
+
+  socket.on("hint", (hint) => {
+    if (btnHint) {
+      btnHint.textContent = "Pedir pista";
+      btnHint.disabled = !state || state.over || currentRole !== "player";
+    }
+    showHintHighlight(hint);
   });
 
   socket.on("roomClosed", (payload) => {
@@ -1076,6 +1101,8 @@ function reasonLabel(reason) {
     case "no_moves": return "Bloqueo: sin movimientos disponibles.";
     case "no_pieces": return "Captura total: el rival perdió todas sus fichas.";
     case "draw": return "Tablas acordadas.";
+    case "draw_repetition": return "Tablas por triple repetición de posición.";
+    case "draw_40_moves": return "Tablas por regla de 40 movimientos sin captura.";
     case "resign": return "Rendición.";
     case "blown": return "Soplido: captura omitida penalizada.";
     default: return "Fin de la partida.";
@@ -1475,7 +1502,106 @@ function clearRoomState() {
   lastBuzzSentAt = 0;
   if (buzzPanel) buzzPanel.classList.add("hidden");
   if (buzzToast) buzzToast.classList.add("hidden");
+  if (halfMoveInfo) halfMoveInfo.classList.add("hidden");
+  renderMoveHistory([]);
   updateFocusMode(false);
+}
+
+let hintHighlight = null;
+let hintTimeout = null;
+
+function squareLabel(coord) {
+  if (!coord) return "—";
+  const cols = "abcdefgh";
+  return `${cols[coord.c]}${8 - coord.r}`;
+}
+
+function renderMoveHistory(history) {
+  if (!moveHistoryList) return;
+  if (!history || history.length === 0) {
+    moveHistoryList.innerHTML = '<div class="hint" style="padding:8px">Sin movimientos todavía.</div>';
+    if (historyCount) historyCount.textContent = "0 movimientos";
+    return;
+  }
+  if (historyCount) historyCount.textContent = `${history.length} movimiento${history.length !== 1 ? "s" : ""}`;
+
+  // Group moves in pairs (red + black = one turn row)
+  const rows = [];
+  for (let i = 0; i < history.length; i += 2) {
+    rows.push({ redMove: history[i], blackMove: history[i + 1] || null });
+  }
+
+  const frag = document.createDocumentFragment();
+  rows.forEach((row, idx) => {
+    const div = document.createElement("div");
+    div.className = "historyRow";
+    const numSpan = document.createElement("span");
+    numSpan.className = "historyNum";
+    numSpan.textContent = `${idx + 1}.`;
+
+    const fmt = (m) => {
+      if (!m) return "";
+      const label = `${squareLabel(m.from)}→${squareLabel(m.to)}`;
+      const tag = m.capture ? "x" : "";
+      const crown = m.promoted ? "♛" : "";
+      return `${label}${tag}${crown}`;
+    };
+
+    const redSpan = document.createElement("span");
+    redSpan.className = "historyMove red";
+    redSpan.textContent = fmt(row.redMove);
+
+    const blackSpan = document.createElement("span");
+    blackSpan.className = "historyMove black";
+    blackSpan.textContent = fmt(row.blackMove);
+
+    div.appendChild(numSpan);
+    div.appendChild(redSpan);
+    div.appendChild(blackSpan);
+    frag.appendChild(div);
+  });
+
+  moveHistoryList.innerHTML = "";
+  moveHistoryList.appendChild(frag);
+  // Scroll to bottom
+  moveHistoryList.scrollTop = moveHistoryList.scrollHeight;
+}
+
+function showHintHighlight(hint) {
+  clearHintHighlight();
+  if (!hint || !boardCells.length) return;
+  hintHighlight = hint;
+  const { from, to } = hint;
+  const fromCell = boardCells[from.r * 8 + from.c];
+  const toCell = boardCells[to.r * 8 + to.c];
+  if (fromCell) fromCell.classList.add("hint-from");
+  if (toCell) toCell.classList.add("hint-to");
+  if (hintTimeout) window.clearTimeout(hintTimeout);
+  hintTimeout = window.setTimeout(clearHintHighlight, 4000);
+}
+
+function clearHintHighlight() {
+  if (!hintHighlight) return;
+  const { from, to } = hintHighlight;
+  const fromCell = boardCells[from.r * 8 + from.c];
+  const toCell = boardCells[to.r * 8 + to.c];
+  if (fromCell) fromCell.classList.remove("hint-from", "hint-to");
+  if (toCell) toCell.classList.remove("hint-from", "hint-to");
+  hintHighlight = null;
+  if (hintTimeout) { window.clearTimeout(hintTimeout); hintTimeout = null; }
+}
+
+if (btnHint) {
+  btnHint.addEventListener("click", () => {
+    if (!socket || !currentRoom || !state || state.over) return;
+    btnHint.disabled = true;
+    btnHint.textContent = "Calculando...";
+    socket.emit("requestHint", { code: currentRoom });
+    window.setTimeout(() => {
+      btnHint.textContent = "Pedir pista";
+      btnHint.disabled = !state || state.over || currentRole !== "player";
+    }, 2000);
+  });
 }
 
 if (btnShowRecovery) {
