@@ -765,16 +765,21 @@ async function main() {
       room.over = true;
       return { over: true, winner: room.turn === "red" ? "black" : "red", reason: "no_moves" };
     }
-    // Regla de 40 movimientos sin captura ni promoción
-    if (room.halfMoveClock >= HALFMOVE_DRAW_LIMIT) {
-      room.over = true;
-      return { over: true, winner: null, reason: "draw_40_moves" };
-    }
-    // Triple repetición
-    const repCount = recordBoardHistory(room);
-    if (repCount >= REPETITION_DRAW_LIMIT) {
-      room.over = true;
-      return { over: true, winner: null, reason: "draw_repetition" };
+    // Las reglas de tablas solo se verifican en posiciones estables
+    // (sin soplado pendiente). Si hay un pendingBlow, la posición cambiará
+    // cuando el soplado se resuelva o se omita.
+    if (!room.pendingBlow) {
+      // Regla de 40 movimientos sin captura ni promoción
+      if (room.halfMoveClock >= HALFMOVE_DRAW_LIMIT) {
+        room.over = true;
+        return { over: true, winner: null, reason: "draw_40_moves" };
+      }
+      // Triple repetición
+      const repCount = recordBoardHistory(room);
+      if (repCount >= REPETITION_DRAW_LIMIT) {
+        room.over = true;
+        return { over: true, winner: null, reason: "draw_repetition" };
+      }
     }
     return { over: false };
   }
