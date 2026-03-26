@@ -16,7 +16,7 @@
         <button id="soundToggle" class="ghost" type="button" aria-label="Alternar sonido">🔊</button>
         <input id="soundVolume" type="range" min="0" max="10" step="1" aria-label="Volumen"/>
       </div>
-      <div id="versionBadge" class="versionBadge">v1.5.0</div>
+      <div id="versionBadge" class="versionBadge">v1.6.0</div>
     </div>
   </div>
 
@@ -112,6 +112,8 @@
             <div class="row stack">
               <button id="btnRequestDraw" disabled>Solicitar tablas</button>
               <button id="btnResign" class="danger" disabled>Rendirse</button>
+              <button id="btnBlow" class="danger" style="display:none" disabled>Soplar ficha</button>
+              <button id="btnHint" class="ghost" disabled>Pedir pista</button>
               <button id="btnLeaveRoom" class="ghost" disabled>Salir de la sala</button>
               <button id="btnFinishRoom" class="ghost" disabled>Finalizar partida</button>
             </div>
@@ -147,6 +149,7 @@
           <div class="lowerHeader">
             <div class="tabButtons lowerTabs">
               <button class="tabBtn lowerTabBtn active" data-tab="matchPanel">Partida</button>
+              <button class="tabBtn lowerTabBtn" data-tab="historyPanel">Historial</button>
               <button class="tabBtn lowerTabBtn" data-tab="roomChatPanel">Chat de la sala</button>
               <button class="tabBtn lowerTabBtn" data-tab="globalPanel">Global</button>
               <button class="tabBtn lowerTabBtn" data-tab="lobbyPanel">Salas</button>
@@ -161,6 +164,7 @@
                 <div id="status" class="statusLine">Crea o únete a una sala para jugar.</div>
                 <div id="matchMeta" class="hint">El modo Game Focus mantiene el tablero al frente y las capturas son opcionales.</div>
               </div>
+              <div id="halfMoveInfo" class="hint hidden"></div>
               <div id="buzzPanel" class="buzzPanel hidden">
                 <div class="buzzInfo">
                   <div class="buzzTitle">Rival inactivo</div>
@@ -168,6 +172,13 @@
                 </div>
                 <button id="buzzButton">Avisar al rival</button>
               </div>
+            </div>
+            <div class="tabPanel" id="historyPanel">
+              <div class="cardHeader">
+                <h3>Historial de movimientos</h3>
+                <span id="historyCount" class="pill ghost">0 movimientos</span>
+              </div>
+              <div id="moveHistoryList" class="moveHistoryList"></div>
             </div>
             <div class="tabPanel" id="roomChatPanel">
               <div class="cardHeader">
@@ -222,6 +233,7 @@
                   <option value="easy">Fácil</option>
                   <option value="medium">Media</option>
                   <option value="hard">Difícil</option>
+                  <option value="extreme">Extremo</option>
                 </select>
                 <button id="btnNewAI" class="ghost" disabled>Vs IA</button>
               </div>
@@ -300,7 +312,7 @@
 
   <div id="buzzToast" class="buzzToast hidden" role="status" aria-live="polite"></div>
 
-  <div id="versionFloating" class="versionFloating">v1.5.0</div>
+  <div id="versionFloating" class="versionFloating">v1.6.0</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/tips.js"></script>

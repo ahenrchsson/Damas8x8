@@ -405,3 +405,16 @@ body:not(.inRoom) { --board-safe-area: 340px; }
   10% { opacity:1; }
   100% { transform: translateY(360px) rotate(360deg); opacity: 0; }
 }
+
+/* Move history panel */
+.moveHistoryList { max-height: 300px; overflow-y: auto; font-size: 13px; padding: 6px 0; }
+.historyRow { display: grid; grid-template-columns: 32px 1fr 1fr; gap: 4px; align-items: center; padding: 3px 8px; border-radius: 6px; }
+.historyRow:nth-child(even) { background: rgba(255,255,255,0.03); }
+.historyNum { color: var(--text-muted); font-size: 12px; }
+.historyMove { font-family: monospace; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+.historyMove.red { color: #ff9999; }
+.historyMove.black { color: #b0bec5; }
+
+/* Hint highlight on board */
+.cell.hint-from { box-shadow: inset 0 0 0 3px #ffe066 !important; background: rgba(255,224,102,0.25) !important; }
+.cell.hint-to { box-shadow: inset 0 0 0 3px #66d9ff !important; background: rgba(102,217,255,0.25) !important; }

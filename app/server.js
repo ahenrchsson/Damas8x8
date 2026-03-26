@@ -39,6 +39,7 @@ const {
   colorOf,
   moveSignature,
   coordKey,
+  boardToKey,
   pickLegalAIMove
 } = require("./game");
 
@@ -661,8 +662,15 @@ async function main() {
         red: players?.red?.id ? now : null,
         black: players?.black?.id ? now : null
       },
-      lastBuzzAt: { red: 0, black: 0 }
+      lastBuzzAt: { red: 0, black: 0 },
+      // Draw detection
+      boardHistory: new Map(),   // boardKey -> count (for threefold repetition)
+      halfMoveClock: 0,          // moves without capture or promotion (40-move rule)
+      moveHistory: []            // [{color, from, to, capture, promoted, turnCount}]
     };
+    // Record initial position
+    const initKey = boardToKey(board, turn);
+    room.boardHistory.set(initKey, 1);
     computeRoomState(room);
     return room;
   }
@@ -725,17 +733,24 @@ async function main() {
         user: m.username,
         text: m.text,
         ts: m.ts
-      }))
+      })),
+      halfMoveClock: room.halfMoveClock || 0,
+      moveHistory: (room.moveHistory || []).slice(-200)
     };
+  }
+
+  const HALFMOVE_DRAW_LIMIT = 40;
+  const REPETITION_DRAW_LIMIT = 3;
+
+  function recordBoardHistory(room) {
+    const key = boardToKey(room.board, room.turn);
+    const count = (room.boardHistory.get(key) || 0) + 1;
+    room.boardHistory.set(key, count);
+    return count;
   }
 
   function recompute(room) {
     computeRoomState(room);
-    // sin movimientos = pierde el jugador del turno
-    if (Object.keys(room.moveMap).length === 0) {
-      room.over = true;
-      return { over: true, winner: room.turn === "red" ? "black" : "red", reason: "no_moves" };
-    }
     // sin piezas
     if (!hasAnyPieces(room.board, "red")) {
       room.over = true;
@@ -744,6 +759,27 @@ async function main() {
     if (!hasAnyPieces(room.board, "black")) {
       room.over = true;
       return { over: true, winner: "red", reason: "no_pieces" };
+    }
+    // sin movimientos = pierde el jugador del turno
+    if (Object.keys(room.moveMap).length === 0) {
+      room.over = true;
+      return { over: true, winner: room.turn === "red" ? "black" : "red", reason: "no_moves" };
+    }
+    // Las reglas de tablas solo se verifican en posiciones estables
+    // (sin soplado pendiente). Si hay un pendingBlow, la posición cambiará
+    // cuando el soplado se resuelva o se omita.
+    if (!room.pendingBlow) {
+      // Regla de 40 movimientos sin captura ni promoción
+      if (room.halfMoveClock >= HALFMOVE_DRAW_LIMIT) {
+        room.over = true;
+        return { over: true, winner: null, reason: "draw_40_moves" };
+      }
+      // Triple repetición
+      const repCount = recordBoardHistory(room);
+      if (repCount >= REPETITION_DRAW_LIMIT) {
+        room.over = true;
+        return { over: true, winner: null, reason: "draw_repetition" };
+      }
     }
     return { over: false };
   }
@@ -928,13 +964,55 @@ async function main() {
     if (!match) {
       console.warn("AI generated illegal move, falling back to first legal move");
     }
+
+    const aiPiecesWithCapture = legalMoves.filter((m) => m.isCapture).map((m) => m.pieceFrom);
+    const aiSkippedCapture = aiPiecesWithCapture.length > 0 && !chosen.isCapture;
+    const prevAiTurn = room.turn;
+
     room.board = applyMove(room.board, chosen);
     recordLastMove(room, room.aiColor, chosen);
     room.turn = flipColor(room.turn);
     room.turnCount += 1;
 
+    // Update draw counters for AI move
+    if (chosen.isCapture || chosen.promotes) {
+      room.halfMoveClock = 0;
+    } else {
+      room.halfMoveClock += 1;
+    }
+    room.moveHistory.push({
+      color: room.aiColor,
+      from: chosen.pieceFrom,
+      to: chosen.pieceTo,
+      capture: chosen.isCapture,
+      promoted: !!chosen.promotes,
+      turnCount: room.turnCount - 1
+    });
+
+    const aiBlowablePieces = aiSkippedCapture ? aiPiecesWithCapture.map((p) => {
+      const movedThisPiece = coordKey(p) === coordKey(chosen.pieceFrom);
+      return movedThisPiece ? chosen.pieceTo : p;
+    }).filter((pos) => {
+      const piece = room.board[pos.r]?.[pos.c];
+      return piece && colorOf(piece) === prevAiTurn;
+    }) : [];
+
+    room.pendingBlow = aiSkippedCapture && aiBlowablePieces.length > 0 ? {
+      blowablePieces: aiBlowablePieces,
+      pieceColor: prevAiTurn,
+      offeredTo: room.turn,
+      ts: Date.now(),
+      turnNumber: room.turnCount - 1,
+      missedCapture: chosen
+    } : null;
+
     const chk = recompute(room);
     io.to(room.code).emit("state", publicStateFor(room));
+
+    if (room.pendingBlow && room.players[room.turn]?.sid) {
+      io.to(room.players[room.turn].sid).emit("blowOffered", { code: room.code, blowablePieces: room.pendingBlow.blowablePieces });
+    }
+
     if (chk.over) {
       io.to(room.code).emit("gameOver", chk);
     }
@@ -1272,6 +1350,22 @@ async function main() {
       recordLastMove(room, room.turn, match);
       if (skippedCapture) room.lastMove.missedCapture = true;
       const prevTurn = room.turn;
+
+      // Update draw counters
+      if (match.isCapture || match.promotes) {
+        room.halfMoveClock = 0;
+      } else {
+        room.halfMoveClock += 1;
+      }
+      // Record move in history
+      room.moveHistory.push({
+        color: room.turn,
+        from: match.pieceFrom,
+        to: match.pieceTo,
+        capture: match.isCapture,
+        promoted: !!match.promotes,
+        turnCount: room.turnCount
+      });
       const blowablePieces = skippedCapture ? piecesWithCapture.map((p) => {
         const movedThisPiece = coordKey(p) === coordKey(match.pieceFrom);
         const currentPos = movedThisPiece ? match.pieceTo : p;
@@ -1442,6 +1536,19 @@ async function main() {
       io.to(code).emit("gameOver", { over: true, winner, reason: "resign" });
       await finalizeRatedGame(room, winner);
       await cleanupRoom(room, "surrender");
+    });
+
+    socket.on("requestHint", ({ code }) => {
+      if (!ensureAuth()) return;
+      const room = rooms.get((code || "").toUpperCase());
+      if (!room || room.over) return;
+      const color = ensurePlayer(room);
+      if (!color) return socket.emit("err", { error: "not_player" });
+
+      // Compute best move at medium difficulty for hints
+      const { move } = pickLegalAIMove(room.board, color, { difficulty: "medium" });
+      if (!move) return;
+      socket.emit("hint", { from: move.pieceFrom, to: move.pieceTo, path: move.path });
     });
 
     socket.on("disconnect", () => {

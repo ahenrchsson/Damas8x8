@@ -365,8 +365,46 @@ const EVAL_WEIGHTS = {
   blocked: -10,
   captureThreat: -15,
   promotionThreat: 22,
-  kingAdvantage: 30
+  kingAdvantage: 30,
+  pst: 1
 };
+
+// Piece-Square Tables for men (from red's perspective, row 7 = red back rank)
+// Higher values = better position for a red man on that square
+const MAN_PST_RED = [
+  [ 0,  5,  0,  5,  0,  5,  0,  5],  // row 0 (black back rank / red promotion)
+  [ 4,  0,  6,  0,  6,  0,  4,  0],
+  [ 0,  4,  0,  8,  0,  8,  0,  4],
+  [ 3,  0,  8,  0, 10,  0,  3,  0],
+  [ 0,  3,  0, 10,  0,  8,  0,  3],
+  [ 4,  0,  8,  0,  8,  0,  4,  0],
+  [ 0,  6,  0,  6,  0,  6,  0,  6],
+  [ 8,  0,  8,  0,  8,  0,  8,  0]   // row 7 (red back rank)
+];
+
+// For black men (mirror of red, since black promotes at row 7)
+const MAN_PST_BLACK = [
+  [ 8,  0,  8,  0,  8,  0,  8,  0],  // row 0 (black back rank)
+  [ 0,  6,  0,  6,  0,  6,  0,  6],
+  [ 4,  0,  8,  0,  8,  0,  4,  0],
+  [ 0,  3,  0, 10,  0,  8,  0,  3],
+  [ 3,  0,  8,  0, 10,  0,  3,  0],
+  [ 0,  4,  0,  8,  0,  8,  0,  4],
+  [ 4,  0,  6,  0,  6,  0,  4,  0],
+  [ 0,  5,  0,  5,  0,  5,  0,  5]   // row 7 (red promotion / black starts)
+];
+
+// King PST: kings prefer center and flexibility
+const KING_PST = [
+  [ 0,  4,  0,  4,  0,  4,  0,  4],
+  [ 4,  0,  6,  0,  6,  0,  4,  0],
+  [ 0,  6,  0, 10,  0, 10,  0,  6],
+  [ 4,  0, 10,  0, 12,  0,  4,  0],
+  [ 0,  4,  0, 12,  0, 10,  0,  4],
+  [ 6,  0, 10,  0, 10,  0,  6,  0],
+  [ 0,  4,  0,  6,  0,  6,  0,  4],
+  [ 4,  0,  4,  0,  4,  0,  4,  0]
+];
 
 const WIN_SCORE = 50_000;
 const QUIESCENCE_MAX_DEPTH = 6;
@@ -428,6 +466,19 @@ function createZobrist() {
   };
 }
 
+// Returns a compact string key representing the board position + turn
+// Used for threefold-repetition detection
+function boardToKey(board, turnColor) {
+  const cells = [];
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const v = board[r][c];
+      if (v !== 0) cells.push(`${r}${c}${v > 0 ? "+" : ""}${v}`);
+    }
+  }
+  return `${turnColor[0]}:${cells.join(",")}`;
+}
+
 function evaluateBoard(board, perspectiveColor) {
   let score = 0;
   let myMen = 0;
@@ -440,16 +491,12 @@ function evaluateBoard(board, perspectiveColor) {
   let oppBlocked = 0;
   let myAdvance = 0;
   let oppAdvance = 0;
-  let myCenter = 0;
-  let oppCenter = 0;
   let myBackRank = 0;
   let oppBackRank = 0;
   let myPromotionThreat = 0;
   let oppPromotionThreat = 0;
-
-  const centerSquares = new Set([
-    "2,3", "2,5", "3,2", "3,4", "4,3", "4,5", "5,2", "5,4"
-  ]);
+  let myPst = 0;
+  let oppPst = 0;
 
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -467,10 +514,11 @@ function evaluateBoard(board, perspectiveColor) {
         if (king) oppKings += 1; else oppMen += 1;
       }
 
-      const centerKey = `${r},${c}`;
-      if (centerSquares.has(centerKey)) {
-        if (isMine) myCenter += 1; else oppCenter += 1;
-      }
+      // Piece-Square Table bonus
+      const pstVal = king
+        ? KING_PST[r][c]
+        : (col === "red" ? MAN_PST_RED[r][c] : MAN_PST_BLACK[r][c]);
+      if (isMine) myPst += pstVal; else oppPst += pstVal;
 
       if (!king) {
         const advance = col === "red" ? 7 - r : r;
@@ -519,12 +567,12 @@ function evaluateBoard(board, perspectiveColor) {
   }
 
   score += (myKings - oppKings) * EVAL_WEIGHTS.kingAdvantage;
-  score += (myCenter - oppCenter) * EVAL_WEIGHTS.center;
   score += (myAdvance - oppAdvance) * EVAL_WEIGHTS.advance;
   score += (myBackRank - oppBackRank) * EVAL_WEIGHTS.backRank;
   score += (myConnected - oppConnected) * EVAL_WEIGHTS.connected;
   score += (myBlocked - oppBlocked) * EVAL_WEIGHTS.blocked;
   score += (myPromotionThreat - oppPromotionThreat) * EVAL_WEIGHTS.promotionThreat;
+  score += (myPst - oppPst) * EVAL_WEIGHTS.pst;
 
   const myMoves = computeMoves(board, perspectiveColor);
   const oppMoves = computeMoves(board, opponentColor(perspectiveColor));
@@ -789,6 +837,7 @@ module.exports = {
   coord,
   coordKey,
   moveSignature,
+  boardToKey,
   generateKingCaptureSequences,
   generateManCaptureSequences,
   getPiecesThatCanCapture,
