@@ -964,6 +964,11 @@ async function main() {
     if (!match) {
       console.warn("AI generated illegal move, falling back to first legal move");
     }
+
+    const aiPiecesWithCapture = legalMoves.filter((m) => m.isCapture).map((m) => m.pieceFrom);
+    const aiSkippedCapture = aiPiecesWithCapture.length > 0 && !chosen.isCapture;
+    const prevAiTurn = room.turn;
+
     room.board = applyMove(room.board, chosen);
     recordLastMove(room, room.aiColor, chosen);
     room.turn = flipColor(room.turn);
@@ -984,8 +989,30 @@ async function main() {
       turnCount: room.turnCount - 1
     });
 
+    const aiBlowablePieces = aiSkippedCapture ? aiPiecesWithCapture.map((p) => {
+      const movedThisPiece = coordKey(p) === coordKey(chosen.pieceFrom);
+      return movedThisPiece ? chosen.pieceTo : p;
+    }).filter((pos) => {
+      const piece = room.board[pos.r]?.[pos.c];
+      return piece && colorOf(piece) === prevAiTurn;
+    }) : [];
+
+    room.pendingBlow = aiSkippedCapture && aiBlowablePieces.length > 0 ? {
+      blowablePieces: aiBlowablePieces,
+      pieceColor: prevAiTurn,
+      offeredTo: room.turn,
+      ts: Date.now(),
+      turnNumber: room.turnCount - 1,
+      missedCapture: chosen
+    } : null;
+
     const chk = recompute(room);
     io.to(room.code).emit("state", publicStateFor(room));
+
+    if (room.pendingBlow && room.players[room.turn]?.sid) {
+      io.to(room.players[room.turn].sid).emit("blowOffered", { code: room.code, blowablePieces: room.pendingBlow.blowablePieces });
+    }
+
     if (chk.over) {
       io.to(room.code).emit("gameOver", chk);
     }

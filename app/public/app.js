@@ -57,6 +57,7 @@ const playerRed = $("playerRed");
 const playerBlack = $("playerBlack");
 const btnRequestDraw = $("btnRequestDraw");
 const btnResign = $("btnResign");
+const btnBlow = $("btnBlow");
 const btnHint = $("btnHint");
 const halfMoveInfo = $("halfMoveInfo");
 const moveHistoryList = $("moveHistoryList");
@@ -613,12 +614,21 @@ function initSocket() {
     forcedTxt.textContent = st.forced ? "Capturas recomendadas visibles (opcionales)" : "Movimiento libre";
     const blowTargets = normalizeBlowablePieces(st.pendingBlow?.blowablePieces);
     if (!st.pendingBlow) awaitingBlowSelection = false;
+    const canBlowNow = !st.over && currentRole === "player" && blowTargets.length > 0 && st.turn === myColor;
+    if (btnBlow) {
+      btnBlow.style.display = canBlowNow ? "" : "none";
+      btnBlow.disabled = !canBlowNow;
+    }
     let pendingMsg = "";
     if (st.pendingDraw) {
       pendingMsg = `Solicitud de tablas por ${st.pendingDraw.by}`;
     } else if (st.pendingBlow && blowTargets.length) {
       const blowLabel = blowTargets.length === 1 ? ` en ${squareName(blowTargets[0])}` : ` (${blowTargets.length} fichas disponibles)`;
-      pendingMsg = `Puedes soplar ficha rival${blowLabel}`;
+      if (canBlowNow) {
+        pendingMsg = `¡Puedes soplar ficha rival${blowLabel}! Pulsa "Soplar ficha" o haz click en la ficha resaltada.`;
+      } else {
+        pendingMsg = `Soplar pendiente${blowLabel}`;
+      }
       if (awaitingBlowSelection && blowTargets.length > 1) {
         pendingMsg += " • Haz click en una ficha resaltada para soplar.";
       }
@@ -754,19 +764,11 @@ function initSocket() {
     if (code !== currentRoom) return;
     const targets = normalizeBlowablePieces(blowablePieces);
     if (!targets.length) return;
+    playClickSound();
     const coordTxt = targets.length === 1
-      ? ` (${squareName(targets[0])})`
-      : ` (${targets.length} opciones: ${targets.map(squareName).join(", ")})`;
-    const accept = window.confirm(`El rival omitió una captura obligatoria${coordTxt}. ${targets.length > 1 ? "Elige cuál soplar haciendo click en una ficha resaltada." : "¿Soplar ficha?"}`);
-    if (accept) {
-      playClickSound();
-      if (targets.length === 1) {
-        socket.emit("blowPiece", { code, target: targets[0] });
-      } else {
-        awaitingBlowSelection = true;
-        status.textContent = "Selecciona en el tablero la ficha a soplar.";
-      }
-    }
+      ? ` en ${squareName(targets[0])}`
+      : ` (${targets.length} fichas disponibles)`;
+    showBuzzToast(`¡El rival omitió una captura! Pulsa "Soplar ficha"${coordTxt} o haz click en la ficha resaltada del tablero.`);
   });
 }
 
@@ -1503,6 +1505,7 @@ function clearRoomState() {
   if (buzzPanel) buzzPanel.classList.add("hidden");
   if (buzzToast) buzzToast.classList.add("hidden");
   if (halfMoveInfo) halfMoveInfo.classList.add("hidden");
+  if (btnBlow) { btnBlow.style.display = "none"; btnBlow.disabled = true; }
   renderMoveHistory([]);
   updateFocusMode(false);
 }
@@ -1589,6 +1592,23 @@ function clearHintHighlight() {
   if (toCell) toCell.classList.remove("hint-from", "hint-to");
   hintHighlight = null;
   if (hintTimeout) { window.clearTimeout(hintTimeout); hintTimeout = null; }
+}
+
+if (btnBlow) {
+  btnBlow.addEventListener("click", () => {
+    if (!socket || !currentRoom || !state?.pendingBlow) return;
+    const targets = normalizeBlowablePieces(state.pendingBlow.blowablePieces);
+    if (!targets.length) return;
+    playClickSound();
+    if (targets.length === 1) {
+      socket.emit("blowPiece", { code: currentRoom, target: targets[0] });
+      awaitingBlowSelection = false;
+    } else {
+      awaitingBlowSelection = true;
+      showBuzzToast("Haz click en una de las fichas resaltadas en el tablero para soplarla.");
+      renderBoard();
+    }
+  });
 }
 
 if (btnHint) {
