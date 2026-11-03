@@ -1,0 +1,9 @@
+[package]
+name    = "damas-game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+damas-common = { path = "../common" }
+serde        = { workspace = true }
+rand         = { workspace = true }

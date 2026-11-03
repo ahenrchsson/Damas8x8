@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Damas 8×8</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🎮</text></svg>" />
+  <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --card:    #22263a;
+      --border:  #2e3348;
+      --text:    #e2e8f0;
+      --muted:   #8892a4;
+      --accent:  #6c63ff;
+      --accent2: #a78bfa;
+      --red:     #ff6b6b;
+      --black:   #90caf9;
+      --cell-light: #e8c98a;
+      --cell-dark:  #8b5e3c;
+      --gap: 6px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+    button {
+      background: var(--accent); color: #fff; border: none;
+      padding: 8px 16px; border-radius: 6px; cursor: pointer;
+      font-size: 14px; transition: opacity .15s;
+    }
+    button:hover:not(:disabled) { opacity: .85; }
+    button:disabled { opacity: .4; cursor: default; }
+    button.ghost {
+      background: transparent; color: var(--text);
+      border: 1px solid var(--border);
+    }
+    button.danger { background: #e53e3e; }
+    button.success { background: #38a169; }
+    input, select {
+      background: var(--card); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 12px; font-size: 14px; width: 100%;
+    }
+    input:focus, select:focus { outline: 2px solid var(--accent); }
+    .hidden { display: none !important; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px;
+    }
+    h2 { font-size: 1.2rem; margin-bottom: 12px; color: var(--accent2); }
+    h3 { font-size: 1rem; margin-bottom: 8px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .col { display: flex; flex-direction: column; gap: 8px; }
+    .hint-msg { color: var(--muted); font-size: 13px; }
+
+    /* Layout */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 20px; display: flex; align-items: center; gap: 12px;
+    }
+    header h1 { font-size: 1.1rem; flex: 1; }
+    .layout { display: flex; gap: 0; height: calc(100vh - 52px); }
+    .sidebar {
+      width: 300px; min-width: 300px;
+      background: var(--surface); border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 12px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .main-area {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-start;
+      padding: 20px; gap: 12px; overflow-y: auto;
+    }
+
+    /* Board */
+    #board {
+      display: grid; grid-template-columns: repeat(8, 1fr);
+      width: min(480px, 95vw); aspect-ratio: 1/1;
+      border: 3px solid var(--border); border-radius: 4px;
+      overflow: hidden;
+    }
+    .cell {
+      display: flex; align-items: center; justify-content: center;
+      cursor: default; position: relative; transition: background .1s;
+    }
+    .cell.light { background: var(--cell-light); }
+    .cell.dark  { background: var(--cell-dark); }
+    .cell.clickable { cursor: pointer; }
+    .cell.selected  { box-shadow: inset 0 0 0 3px var(--accent); }
+    .cell.move-target { box-shadow: inset 0 0 0 3px #66d9ff; }
+    .cell.capture-target { box-shadow: inset 0 0 0 3px var(--red); }
+    .cell.blow-target { box-shadow: inset 0 0 0 3px orange; }
+    .cell.hint-from { box-shadow: inset 0 0 0 3px #ffe066; }
+    .cell.hint-to   { box-shadow: inset 0 0 0 3px #66d9ff; }
+    .piece {
+      width: 78%; height: 78%; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4em; font-weight: bold; user-select: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,.4);
+      transition: transform .1s;
+    }
+    .piece.red   { background: radial-gradient(circle at 35% 35%, #ff9999, #c0392b); }
+    .piece.black { background: radial-gradient(circle at 35% 35%, #4a4a4a, #1a1a1a); }
+    .piece.king::after { content: '♛'; font-size: 0.6em; position: absolute; color: gold; }
+
+    /* Controls area */
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    .info-row { font-size: 13px; color: var(--muted); }
+    .pending-msg { font-size: 13px; color: #ffd700; min-height: 18px; }
+
+    /* Chat */
+    .chat-log {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px; max-height: 160px; overflow-y: auto;
+      font-size: 12px; display: flex; flex-direction: column; gap: 4px;
+    }
+    .chat-msg .author { font-weight: bold; }
+    .chat-msg .author.red   { color: var(--red); }
+    .chat-msg .author.black { color: var(--black); }
+
+    /* Lobby table */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: var(--card); border: 1px solid var(--accent);
+      padding: 10px 20px; border-radius: 8px; font-size: 14px;
+      z-index: 999; opacity: 0; transition: opacity .3s; pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+
+    @media (max-width: 700px) {
+      .layout { flex-direction: column; }
+      .sidebar { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid var(--border); max-height: 280px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<script type="module">
+  import init from './pkg/damas_frontend.js';
+  init().then(() => {}).catch(console.error);
+</script>
+</body>
+</html>
